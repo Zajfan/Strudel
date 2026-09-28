@@ -60,6 +60,12 @@ A probe that observes zero events or zero signal reports `fail`, never `pass`.
     needs a **native rewrite**, possibly still driven by Strudel.
 - Browser-only walls are expected and never trigger a port. The Browser tier is a
   defined subset.
+- **First fallback for engine walls: VersaTone.** The user's own C++23 engine
+  ("DAWG", `Nexus-Systems/apps/VersaTone`) is the first candidate, before any
+  native rewrite. It runs as a separate process driven over OSC, the way Strudel
+  already drives SuperDirt. VersaTone is proprietary and Strudel is AGPL-3.0, so
+  linking them into one binary requires relicensing first. Its capacity claims
+  are unmeasured; the same probes apply to it before it is adopted.
 
 ## Initial matrix
 
