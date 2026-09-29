@@ -42,6 +42,10 @@ export function automationPattern() {
   return note(69).s('sine').fast(16).clip(0.5).attack(0).release(0.002).gain(saw.range(0.2, 1));
 }
 
+export function rampPattern() {
+  return note(57).s('sine').attack(0).release(0.01).clip(1).gain(saw.range(0.1, 1));
+}
+
 export const DUCK = { cps: 1, triggerAt: 0.25 };
 
 export function duckPattern() {

@@ -63,6 +63,15 @@ export function duckDrop(samples, sampleRate, { triggerAt }) {
   return { beforeRms, afterRms, dropDb: -toDb(afterRms / beforeRms) };
 }
 
+// RMS in two windows within the first cycle (a continuous ramp should differ; a value sampled
+// once per event should not). Windows are fractions of the cycle length so they scale with cps.
+export function rampWithinNote(samples, sampleRate, { cps }) {
+  const cycleLen = sampleRate / cps;
+  const firstRms = windowRms(samples, 0.05 * cycleLen, 0.25 * cycleLen);
+  const lastRms = windowRms(samples, 0.75 * cycleLen, 0.95 * cycleLen);
+  return { firstRms, lastRms, changeDb: toDb(lastRms / firstRms) };
+}
+
 export function stemResidual(mix, stems) {
   let worst = 0;
   for (let i = 0; i < mix.length; i++) {

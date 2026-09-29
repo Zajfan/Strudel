@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { analyzeSteps, checkArrangement, checkTuning, duckDrop, locateError, stemResidual } from '../lib/checks.mjs';
+import { analyzeSteps, checkArrangement, checkTuning, duckDrop, locateError, rampWithinNote, stemResidual } from '../lib/checks.mjs';
 
 const hap = (begin, note) => ({ whole: { begin }, value: { note } });
 
@@ -59,6 +59,19 @@ describe('duckDrop', () => {
     const sr = 1000;
     const x = new Float32Array(sr).map((_, i) => (i < 250 ? 1 : 0.5) * (i % 2 ? 1 : -1));
     expect(duckDrop(x, sr, { cps: 1, triggerAt: 0.25 }).dropDb).toBeCloseTo(6.0206, 3);
+  });
+});
+
+describe('rampWithinNote', () => {
+  it('is near 0 dB for a constant-amplitude tone', () => {
+    const sr = 1000;
+    const x = Float32Array.from({ length: sr }, (_, i) => 0.5 * (i % 2 ? 1 : -1));
+    expect(rampWithinNote(x, sr, { cps: 1 }).changeDb).toBeCloseTo(0, 6);
+  });
+  it('reports ~+6.02 dB when the amplitude doubles between the windows', () => {
+    const sr = 1000;
+    const x = Float32Array.from({ length: sr }, (_, i) => (i < 500 ? 0.25 : 0.5) * (i % 2 ? 1 : -1));
+    expect(rampWithinNote(x, sr, { cps: 1 }).changeDb).toBeCloseTo(6.0206, 3);
   });
 });
 
