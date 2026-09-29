@@ -121,10 +121,16 @@ missing probes as `not-run`.
 
 ### Browser tier
 
-This tier is semi-manual, as in `tools/baseline/README.md`. The user runs the page
-scripts in a disposable profile, saves the returned JSON, and
-`run.mjs --tier browser --ingest <file>` merges it. Playwright automation is a
-later add-on, not a dependency of #0.
+*Amended 2026-09-29: automation is now in scope.* `run.mjs --tier browser` serves
+`website/dist` locally with the cross-origin isolation headers from
+`website/astro.config.mjs`, launches the headless Chromium already present in the
+Playwright cache (`~/.cache/ms-playwright`), and drives it over the Chrome DevTools
+Protocol using Node's built-in `WebSocket`. No new dependencies. Browser probes are
+Node modules (`probes/browser/<ID>.mjs`) that evaluate code in the page via `ctx.page`.
+`--ingest` stays available for results produced by hand in a real browser.
+Headless Chromium has a fake audio device and no MIDI devices, so SYNC-1 reports
+`not-run` there, and live-playback measurements observe Web Audio scheduling and
+rendered signal, not physical speaker output.
 
 ### Desktop tier
 
@@ -132,7 +138,9 @@ Desktop probes run `cargo` and standalone throwaway Rust binaries under
 `tools/capabilities/spikes/`. PLUG-1 starts as a spike: can a Rust host crate
 (for example `clack-host` for CLAP) load a plugin and render audio? A yes means
 the capability is reachable through the Tauri backend. A demonstrated no is
-recorded as a wall with evidence.
+recorded as a wall with evidence. *Amended 2026-09-29:* the plugin under test is
+Surge XT (open-source, ships CLAP), installed by the user from the official RPM.
+While it is absent, PLUG-1 reports `not-run`.
 
 ## First probe order
 
@@ -153,7 +161,6 @@ recorded as a wall with evidence.
 ## Out of scope
 
 - Fixing any capability.
-- Automated browser runs.
 - Upstreaming anything to `codeberg.org/uzu/strudel`.
 
 ## Licensing note
