@@ -63,6 +63,11 @@ export function duckDrop(samples, sampleRate, { triggerAt }) {
   return { beforeRms, afterRms, dropDb: -toDb(afterRms / beforeRms) };
 }
 
+// duckDrop around an explicit trigger sample index (e.g. a trigger located in a live recording).
+export function duckDropAt(samples, sampleRate, triggerIndex) {
+  return duckDrop(samples, sampleRate, { triggerAt: triggerIndex / sampleRate });
+}
+
 // Detection floor for "did the level change at all within the note" (used with rampWithinNote), not
 // a spec threshold: a continuous ramp from 0.1 to 1 clears this by a wide margin, while a value
 // sampled once per event (and held for the rest of the note) stays near 0 dB.

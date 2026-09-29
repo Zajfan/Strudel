@@ -1,29 +1,16 @@
 // Renders a pattern offline inside the REPL page through the page's own renderPatternAudio, and
 // hands the left channel back to Node. The builder must use page globals only (it is sent as source).
 import { decodeFloat32 } from '../measure.mjs';
+import { withMiniStrings } from './page-scope.mjs';
 
 // Runs in the page. Kept free of closures over Node scope: it is serialized with toString().
 async function renderInPageScript({ builderSource, cps, cycles, sampleRate, samples }) {
   if (typeof globalThis.renderPatternAudio !== 'function') {
     return { missing: 'renderPatternAudio' };
   }
-  if (typeof globalThis.miniAllStrings !== 'function' || typeof globalThis.setStringParser !== 'function') {
-    return { missing: 'miniAllStrings/setStringParser' };
-  }
-  // Node's loadScope() calls miniAllStrings(), so builders may pass single-quoted mini notation
-  // ('<1 2>*4'). The page's user code gets that from the transpiler instead, so mirror Node here
-  // for the duration of this render and restore the default (no string parser) afterwards.
-  globalThis.miniAllStrings();
-  let pattern;
-  let events;
-  try {
-    // Indirect eval runs in global scope, so the builder sees the REPL's evalScope globals.
-    pattern = (0, eval)(`(${builderSource})`)();
-    events = pattern.queryArc(0, cycles).filter((h) => h.hasOnset()).length;
-  } catch (err) {
-    globalThis.setStringParser(undefined);
-    throw err;
-  }
+  // Indirect eval runs in global scope, so the builder sees the REPL's evalScope globals.
+  const pattern = (0, eval)(`(${builderSource})`)();
+  const events = pattern.queryArc(0, cycles).filter((h) => h.hasOnset()).length;
 
   const renderProto = OfflineAudioContext.prototype;
   const anchorProto = HTMLAnchorElement.prototype;
@@ -51,7 +38,6 @@ async function renderInPageScript({ builderSource, cps, cycles, sampleRate, samp
   } finally {
     renderProto.startRendering = originalStartRendering;
     anchorProto.click = originalClick;
-    globalThis.setStringParser(undefined);
   }
 
   const left = buffer.getChannelData(0);
@@ -86,10 +72,12 @@ async function renderInPageScript({ builderSource, cps, cycles, sampleRate, samp
 // channels, events (onset haps in [0, cycles)) and suppressedDownloads for diagnostics.
 // `samples: false` skips transferring the audio (left is null); the hash is always computed in the page.
 export async function renderInPage(page, builderFn, { cps, cycles, sampleRate = 48000, samples = true, timeoutMs } = {}) {
-  const out = await page.evaluate(
-    renderInPageScript,
-    { builderSource: builderFn.toString(), cps, cycles, sampleRate, samples },
-    timeoutMs ? { timeoutMs } : undefined,
+  const out = await withMiniStrings(page, () =>
+    page.evaluate(
+      renderInPageScript,
+      { builderSource: builderFn.toString(), cps, cycles, sampleRate, samples },
+      timeoutMs ? { timeoutMs } : undefined,
+    ),
   );
   if (out?.missing) throw new Error(`${out.missing} not in page scope`);
   return {

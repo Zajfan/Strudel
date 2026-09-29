@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { analyzeSteps, checkArrangement, checkTuning, duckDrop, locateError, rampWithinNote, stemResidual } from '../lib/checks.mjs';
+import { analyzeSteps, checkArrangement, checkTuning, duckDrop, duckDropAt, locateError, rampWithinNote, stemResidual } from '../lib/checks.mjs';
 
 const hap = (begin, note) => ({ whole: { begin }, value: { note } });
 
@@ -59,6 +59,14 @@ describe('duckDrop', () => {
     const sr = 1000;
     const x = new Float32Array(sr).map((_, i) => (i < 250 ? 1 : 0.5) * (i % 2 ? 1 : -1));
     expect(duckDrop(x, sr, { cps: 1, triggerAt: 0.25 }).dropDb).toBeCloseTo(6.0206, 3);
+  });
+
+  it('takes an explicit trigger sample index', () => {
+    const sr = 1000;
+    const x = new Float32Array(2 * sr).map((_, i) => (i < 1300 ? 1 : 0.25) * (i % 2 ? 1 : -1));
+    const r = duckDropAt(x, sr, 1300);
+    expect(r.dropDb).toBeCloseTo(12.0412, 3);
+    expect(r).toEqual(duckDrop(x, sr, { triggerAt: 1.3 }));
   });
 });
 
