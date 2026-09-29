@@ -18,7 +18,8 @@ export async function probe({ repoRoot, thresholds, log }) {
   const logTail = (run.stderr ?? '').trim().split('\n').slice(-30).join('\n');
   const metrics = { exitCode: run.status, seconds };
   if (run.error) {
-    return { status: 'fail', metrics: { ...metrics, headline: 'timed out' }, notes: { error: String(run.error), logTail } };
+    const headline = run.error.code === 'ETIMEDOUT' ? 'timed out' : `spawn error ${run.error.code ?? 'unknown'}`;
+    return { status: 'fail', metrics: { ...metrics, headline }, notes: { error: String(run.error), logTail } };
   }
   if (run.status !== 0) {
     return { status: 'fail', metrics: { ...metrics, headline: 'cargo check failed' }, notes: { logTail } };
