@@ -1,18 +1,16 @@
 // Reference song for render probes: the pattern from packages/supradough/dough-export.mjs,
 // synth-only so it needs no network. Builds with global pattern functions after evalScope.
 /* global note, s, chord, sine, press, add, ply, rev */
-import { evalScope } from '@strudel/core';
-import { miniAllStrings } from '@strudel/mini';
+import { loadScope } from './scope.mjs';
 
 export const REFERENCE = { cps: 0.5, cycles: 32, tail: 1, sampleRate: 48000 };
 
-let loaded;
-
 export async function referenceSong() {
-  loaded ??= evalScope(import('@strudel/core'), import('@strudel/mini'), import('@strudel/tonal')).then(() =>
-    miniAllStrings(),
-  );
-  await loaded;
+  await loadScope();
+  return buildReferenceSong();
+}
+
+export function buildReferenceSong() {
   return note('c,eb,g,<bb c4 d4 eb4>')
     .s('sine')
     .press()
