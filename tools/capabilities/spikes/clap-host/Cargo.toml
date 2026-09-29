@@ -1,0 +1,16 @@
+[package]
+name = "clap-host"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Throwaway PLUG-1 spike: can a Rust backend host a CLAP instrument?"
+
+[dependencies]
+clack-host = "=0.2.0"
+clack-extensions = { version = "=0.2.0", features = ["clack-host", "audio-ports", "note-ports", "log"] }
+
+# Standalone: keep this crate out of any parent workspace.
+[workspace]
+
+[profile.release]
+debug = false
