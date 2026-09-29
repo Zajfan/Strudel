@@ -2,11 +2,14 @@
 // Runs capability probes for one tier and regenerates MATRIX.md.
 // See tools/capabilities/README.md.
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
+import { findChromium, launchChromium } from './lib/browser/chromium.mjs';
+import { openPage, waitForRepl } from './lib/browser/cdp.mjs';
+import { startStaticServer } from './lib/browser/server.mjs';
 import { cellsForTier, loadCapabilities, renderMatrix, TIERS } from './lib/matrix.mjs';
 import { normalizeResult, runProbe } from './lib/result.mjs';
 
@@ -41,6 +44,60 @@ async function runTier(tier, only) {
       { tier, thresholds: cell.thresholds, repoRoot, tmpDir: tmpdir(), log },
     );
     console.log(`[${tier}] ${cell.id}: ${results[cell.id].status}`);
+  }
+  return results;
+}
+
+function notRunAll(cells, reason) {
+  const results = {};
+  for (const cell of cells) results[cell.id] = { status: 'not-run', metrics: {}, notes: { reason } };
+  return results;
+}
+
+// Browser tier without --ingest: drives the production build in a headless Chromium tab over the
+// DevTools protocol instead of reading a manually-produced results file.
+async function runBrowserTier(tier, only) {
+  const cells = cellsForTier(caps, tier).filter((c) => !only || c.id === only);
+  const distPath = join(repoRoot, 'website', 'dist', 'index.html');
+  if (!existsSync(distPath)) return notRunAll(cells, 'website/dist missing: run pnpm build');
+
+  const executable = findChromium();
+  if (!executable) return notRunAll(cells, 'no Chromium headless shell in ~/.cache/ms-playwright');
+
+  const dist = { path: distPath, builtAt: statSync(distPath).mtime.toISOString() };
+  const server = await startStaticServer(join(repoRoot, 'website', 'dist'));
+  const userDataDir = mkdtempSync(join(tmpdir(), 'caps-chromium-'));
+  let chromium;
+  try {
+    chromium = await launchChromium(executable, userDataDir);
+  } catch (err) {
+    await server.close();
+    return notRunAll(cells, `failed to launch Chromium: ${err.message}`);
+  }
+
+  const results = {};
+  try {
+    for (const cell of cells) {
+      const probePath = join(here, 'probes', tier, `${cell.id}.mjs`);
+      if (!existsSync(probePath)) continue; // no result yet; fillMissing (after carry-forward) covers it
+      console.log(`[${tier}] ${cell.id} ...`);
+      const url = pathToFileURL(probePath).href;
+      const log = (...args) => console.log(`  [${cell.id}]`, ...args);
+      let page;
+      results[cell.id] = await runProbe(
+        async (c) => {
+          page = await openPage(chromium.port, `${server.url}/`);
+          await waitForRepl(page);
+          return (await import(url)).probe({ ...c, page, dist });
+        },
+        { tier, thresholds: cell.thresholds, repoRoot, tmpDir: tmpdir(), log },
+      );
+      if (page) page.close();
+      console.log(`[${tier}] ${cell.id}: ${results[cell.id].status}`);
+    }
+  } finally {
+    chromium.close();
+    await server.close();
   }
   return results;
 }
@@ -128,16 +185,16 @@ if (!values['matrix-only']) {
     console.error(`--tier must be one of: ${TIERS.join(', ')}`);
     process.exit(2);
   }
-  if (tier === 'browser' && !values.ingest) {
-    console.error('browser probes run in a page; pass --ingest <results.json>');
-    process.exit(2);
-  }
   if (values.only && !cellsForTier(caps, tier).some((c) => c.id === values.only)) {
     console.error(`--only ${values.only} is not a ${tier} cell`);
     process.exit(2);
   }
   const source = values.ingest ? 'ingest' : 'probe';
-  const results = values.ingest ? ingest(tier, values.ingest) : await runTier(tier, values.only);
+  const results = values.ingest
+    ? ingest(tier, values.ingest)
+    : tier === 'browser'
+      ? await runBrowserTier(tier, values.only)
+      : await runTier(tier, values.only);
   const provenanced = withProvenance(results, tier, source);
   const date = new Date().toISOString().slice(0, 10);
   const file = join(resultsDir, `${date}-${tier}.json`);

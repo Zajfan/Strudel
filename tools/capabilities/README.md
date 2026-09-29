@@ -8,6 +8,7 @@ Tooling only, not application code. Use Node 22.
 ```sh
 node tools/capabilities/run.mjs --tier cli             # all CLI probes
 node tools/capabilities/run.mjs --tier desktop --only BUILD-0
+node tools/capabilities/run.mjs --tier browser --only BUILD-0
 node tools/capabilities/run.mjs --tier browser --ingest results.json
 node tools/capabilities/run.mjs --matrix-only          # regenerate MATRIX.md
 ```
@@ -51,5 +52,24 @@ export async function probe({ tier, thresholds, repoRoot, tmpDir, log }) {
 - Read limits from `thresholds` (from `capabilities.json`). Never hard-code them.
 - Throwing is recorded as `fail`.
 
-Browser probes run in a page, as in `tools/baseline/README.md`. Save their
-output as `{ "results": { "<ID>": { status, metrics, notes } } }` and ingest it.
+## Browser tier
+
+`--tier browser` runs automatically, the same as desktop and cli: it starts a
+static server over `website/dist`, launches the Playwright-managed headless
+Chromium shell from `~/.cache/ms-playwright`, and drives the REPL over the
+Chrome DevTools Protocol (`lib/browser/server.mjs`, `lib/browser/chromium.mjs`,
+`lib/browser/cdp.mjs`). Each probe gets a fresh page (already waited for
+`window.strudelMirror` and clicked once to unlock audio) via `ctx.page`, plus
+`ctx.dist` (`{ path, builtAt }`). The server and Chromium are started once per
+run and always closed, even on error.
+
+Prerequisites: build the website first (`pnpm build`, producing
+`website/dist/index.html`) and have the Playwright Chromium cache installed
+(`~/.cache/ms-playwright/chromium_headless_shell-*`). If either is missing,
+every browser cell is recorded as `not-run` with a reason naming the missing
+prerequisite, instead of failing the whole run.
+
+`--ingest results.json` is still supported for manually produced browser
+results (e.g. from `tools/baseline/`, as in `tools/baseline/README.md`).
+Save output as `{ "results": { "<ID>": { status, metrics, notes } } }` and
+ingest it the same way as before.
