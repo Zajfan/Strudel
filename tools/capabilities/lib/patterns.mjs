@@ -63,3 +63,10 @@ export function stemPattern() {
     note(55).s('square').orbit(4).gain(0.1),
   );
 }
+
+// PLUG-1: the pattern whose note events drive the hosted CLAP instrument (Node only).
+export const PLUGIN_PATTERN = { source: 'note("c4 e4 g4 c5")', cycles: 1, cps: 1, tailSeconds: 0.5 };
+
+export function pluginPattern() {
+  return note('c4 e4 g4 c5');
+}

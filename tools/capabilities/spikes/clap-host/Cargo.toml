@@ -8,6 +8,7 @@ description = "Throwaway PLUG-1 spike: can a Rust backend host a CLAP instrument
 [dependencies]
 clack-host = "=0.2.0"
 clack-extensions = { version = "=0.2.0", features = ["clack-host", "audio-ports", "note-ports", "log"] }
+serde_json = "1"
 
 # Standalone: keep this crate out of any parent workspace.
 [workspace]
