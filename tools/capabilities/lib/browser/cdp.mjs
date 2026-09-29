@@ -1,4 +1,6 @@
 // Minimal Chrome DevTools Protocol client: opens a page/tab and exposes evaluate/click/errors.
+const DEFAULT_SEND_TIMEOUT_MS = 30000;
+
 export async function openPage(port, url) {
   const created = await fetch(`http://127.0.0.1:${port}/json/new?${url}`, { method: 'PUT' });
   const { webSocketDebuggerUrl } = await created.json();
@@ -13,10 +15,26 @@ export async function openPage(port, url) {
   const pending = new Map();
   const errors = [];
 
-  const send = (method, params = {}) =>
+  // Every CDP call is bounded: a per-call timer is cleared as soon as the call settles (by
+  // response or by the ws closing), so a slow/never-answered call can't keep the event loop
+  // alive after the caller has moved on. `evaluate` overrides the default with its own timeoutMs.
+  const send = (method, params = {}, timeoutMs = DEFAULT_SEND_TIMEOUT_MS) =>
     new Promise((resolve, reject) => {
       const id = nextId++;
-      pending.set(id, { resolve, reject });
+      const timeout = setTimeout(() => {
+        pending.delete(id);
+        reject(new Error(`CDP ${method} timed out after ${timeoutMs} ms`));
+      }, timeoutMs);
+      pending.set(id, {
+        resolve: (result) => {
+          clearTimeout(timeout);
+          resolve(result);
+        },
+        reject: (err) => {
+          clearTimeout(timeout);
+          reject(err);
+        },
+      });
       ws.send(JSON.stringify({ id, method, params }));
     });
 
@@ -48,12 +66,15 @@ export async function openPage(port, url) {
   async function evaluate(fnOrSource, arg, { timeoutMs = 120000 } = {}) {
     const source = typeof fnOrSource === 'function' ? fnOrSource.toString() : fnOrSource;
     const expression = `(${source})(${JSON.stringify(arg)})`;
-    const result = await Promise.race([
-      send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error(`evaluate timed out after ${timeoutMs} ms`)), timeoutMs),
-      ),
-    ]);
+    let result;
+    try {
+      result = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }, timeoutMs);
+    } catch (err) {
+      if (err instanceof Error && err.message === `CDP Runtime.evaluate timed out after ${timeoutMs} ms`) {
+        throw new Error(`evaluate timed out after ${timeoutMs} ms`);
+      }
+      throw err;
+    }
     if (result.exceptionDetails) {
       const desc = result.exceptionDetails.exception?.description ?? result.exceptionDetails.text;
       throw new Error(desc);

@@ -2,7 +2,16 @@
 // Runs capability probes for one tier and regenerates MATRIX.md.
 // See tools/capabilities/README.md.
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -72,6 +81,13 @@ async function runBrowserTier(tier, only) {
     chromium = await launchChromium(executable, userDataDir);
   } catch (err) {
     await server.close();
+    // launchChromium threw before returning its own close(); the profile dir it was given is
+    // now orphaned (chromium may or may not have partially written to it), so clean it up here.
+    try {
+      rmSync(userDataDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    } catch {
+      // Best-effort cleanup: a leftover temp profile dir is harmless.
+    }
     return notRunAll(cells, `failed to launch Chromium: ${err.message}`);
   }
 

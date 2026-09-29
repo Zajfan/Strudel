@@ -1,7 +1,7 @@
 // Minimal static file server for the capability browser tier: serves website/dist (or any
 // root) on 127.0.0.1 with the cross-origin isolation headers the REPL needs for SharedArrayBuffer.
 import { createServer } from 'node:http';
-import { createReadStream, existsSync, statSync } from 'node:fs';
+import { createReadStream, existsSync, realpathSync, statSync } from 'node:fs';
 import { extname, join, resolve, sep } from 'node:path';
 
 // Resolves a raw request path against root by walking '.'/'..' segments ourselves. WHATWG URL
@@ -53,6 +53,7 @@ function contentTypeFor(path) {
 
 export async function startStaticServer(root) {
   const absRoot = resolve(root);
+  const realRoot = realpathSync(absRoot);
   const server = createServer((req, res) => {
     let segments;
     try {
@@ -68,7 +69,7 @@ export async function startStaticServer(root) {
       return;
     }
     let filePath = segments.length ? join(absRoot, ...segments) : absRoot;
-    // Defense in depth: any resolved path outside root (e.g. via a symlink-like join) -> 403.
+    // Lexical check: any resolved path outside root (e.g. an absolute-looking join) -> 403.
     if (filePath !== absRoot && !resolve(filePath).startsWith(absRoot + sep)) {
       res.writeHead(403, ISOLATION_HEADERS);
       res.end();
@@ -79,6 +80,22 @@ export async function startStaticServer(root) {
     }
     if (!existsSync(filePath) || !statSync(filePath).isFile()) {
       res.writeHead(404, ISOLATION_HEADERS);
+      res.end();
+      return;
+    }
+    // Physical check: the lexical check above only catches '..' segments; a symlink *inside*
+    // root can still point at a real file outside it. Resolve the real path and require it to
+    // still be inside root's real path, or refuse it too.
+    let realFilePath;
+    try {
+      realFilePath = realpathSync(filePath);
+    } catch {
+      res.writeHead(404, ISOLATION_HEADERS);
+      res.end();
+      return;
+    }
+    if (realFilePath !== realRoot && !realFilePath.startsWith(realRoot + sep)) {
+      res.writeHead(403, ISOLATION_HEADERS);
       res.end();
       return;
     }
