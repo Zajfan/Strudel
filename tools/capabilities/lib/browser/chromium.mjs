@@ -40,6 +40,8 @@ export async function launchChromium(executable, userDataDir) {
     let buffer = '';
     const timeout = setTimeout(() => {
       child.stderr.off('data', onData);
+      // Don't orphan a Chromium that never said it was listening.
+      child.kill();
       reject(new Error('timed out waiting for Chromium DevTools listening line'));
     }, 30000);
     const onData = (chunk) => {

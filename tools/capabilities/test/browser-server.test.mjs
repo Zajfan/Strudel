@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -36,6 +36,12 @@ try {
   symlinkSkipReason = String(err?.message ?? err);
 }
 
+// An unreadable file passes the existence checks but fails in createReadStream.
+const unreadable = join(root, 'locked.js');
+writeFileSync(unreadable, 'x');
+chmodSync(unreadable, 0o000);
+const unreadableWorks = process.getuid?.() !== 0;
+
 let server;
 beforeAll(async () => {
   server = await startStaticServer(root);
@@ -57,6 +63,9 @@ describe('startStaticServer', () => {
   it('returns 404 for missing files and 403 for escapes', async () => {
     expect((await fetch(server.url + '/nope.js')).status).toBe(404);
     expect(await rawStatus(server.url, '/../../etc/passwd')).toBe(403);
+  });
+  it.runIf(unreadableWorks)('returns 500 when the file cannot be read', async () => {
+    expect((await fetch(server.url + '/locked.js')).status).toBe(500);
   });
   it.runIf(symlinkSupported)('returns 403 for a symlink inside root that points outside root', async () => {
     const r = await fetch(server.url + '/escape-link');

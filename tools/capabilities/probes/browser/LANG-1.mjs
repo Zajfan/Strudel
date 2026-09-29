@@ -8,11 +8,14 @@ export async function probe({ page }) {
     const m = window.strudelMirror;
     const out = [];
     for (const code of codes) {
-      m.setCode(code);
-      await m.evaluate();
-      const e = m.repl.state.error;
-      out.push(e ? { message: String(e.message ?? e), loc: e.loc ?? null, stack: e.stack ? String(e.stack) : null } : null);
-      m.stop();
+      try {
+        m.setCode(code);
+        await m.evaluate();
+        const e = m.repl.state.error;
+        out.push(e ? { message: String(e.message ?? e), loc: e.loc ?? null, stack: e.stack ? String(e.stack) : null } : null);
+      } finally {
+        m.stop();
+      }
     }
     return out;
   }, ERROR_CASES.map((c) => c.code));

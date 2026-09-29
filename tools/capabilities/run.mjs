@@ -57,6 +57,24 @@ async function runTier(tier, only) {
   return results;
 }
 
+// The newest commit touching the sources website/dist is built from, as { sha, committedAt }.
+// Uncommitted edits are not covered: BUILD-0 compares the dist against committed source only.
+function sourceCommit() {
+  try {
+    const out = execFileSync('git', ['log', '-1', '--format=%H%x20%cI', '--', 'packages', 'website'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    }).trim();
+    const [sha, committedAt] = out.split(' ');
+    return sha && committedAt ? { sha, committedAt } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// Set by runBrowserTier so browser results' provenance records which dist they measured.
+let browserDist;
+
 function notRunAll(cells, reason) {
   const results = {};
   for (const cell of cells) results[cell.id] = { status: 'not-run', metrics: {}, notes: { reason } };
@@ -73,7 +91,8 @@ async function runBrowserTier(tier, only) {
   const executable = findChromium();
   if (!executable) return notRunAll(cells, 'no Chromium headless shell in ~/.cache/ms-playwright');
 
-  const dist = { path: distPath, builtAt: statSync(distPath).mtime.toISOString() };
+  const dist = { path: distPath, builtAt: statSync(distPath).mtime.toISOString(), sourceCommit: sourceCommit() };
+  browserDist = dist;
   const server = await startStaticServer(join(repoRoot, 'website', 'dist'));
   const userDataDir = mkdtempSync(join(tmpdir(), 'caps-chromium-'));
   let chromium;
@@ -108,7 +127,13 @@ async function runBrowserTier(tier, only) {
         },
         { tier, thresholds: cell.thresholds, repoRoot, tmpDir: tmpdir(), log },
       );
-      if (page) page.close();
+      if (page) {
+        try {
+          await page.close();
+        } catch (err) {
+          console.log(`  [${cell.id}] could not close the tab: ${err.message}`);
+        }
+      }
       console.log(`[${tier}] ${cell.id}: ${results[cell.id].status}`);
     }
   } finally {
@@ -187,6 +212,7 @@ function withProvenance(results, tier, source) {
     source,
     node: process.version,
     platform: `${process.platform}-${process.arch}`,
+    ...(tier === 'browser' && browserDist && { distBuiltAt: browserDist.builtAt }),
   };
   const out = {};
   for (const [id, result] of Object.entries(results)) {

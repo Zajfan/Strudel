@@ -60,8 +60,16 @@ Chromium shell from `~/.cache/ms-playwright`, and drives the REPL over the
 Chrome DevTools Protocol (`lib/browser/server.mjs`, `lib/browser/chromium.mjs`,
 `lib/browser/cdp.mjs`). Each probe gets a fresh page (already waited for
 `window.strudelMirror` and clicked once to unlock audio) via `ctx.page`, plus
-`ctx.dist` (`{ path, builtAt }`). The server and Chromium are started once per
-run and always closed, even on error.
+`ctx.dist` (`{ path, builtAt, sourceCommit: { sha, committedAt } }`, where
+`sourceCommit` is the newest commit touching `packages/` or `website/`). Each
+tab is closed (`/json/close/<id>`) after its probe. `ctx.page.errors` holds page
+exceptions and error log entries; `ctx.page.warnings` and
+`ctx.page.consoleErrors` hold `console.warn`/`console.error` text. The server and
+Chromium are started once per run and always closed, even on error. Browser
+results' `run` also records `distBuiltAt`.
+
+Browser BUILD-0 does not rebuild: it fails when `website/dist` is older than
+the newest source commit. Run `pnpm build` first.
 
 Prerequisites: build the website first (`pnpm build`, producing
 `website/dist/index.html`) and have the Playwright Chromium cache installed

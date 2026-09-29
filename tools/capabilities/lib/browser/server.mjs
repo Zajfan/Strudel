@@ -99,8 +99,18 @@ export async function startStaticServer(root) {
       res.end();
       return;
     }
-    res.writeHead(200, { ...ISOLATION_HEADERS, 'Content-Type': contentTypeFor(filePath) });
-    createReadStream(filePath).pipe(res);
+    const stream = createReadStream(filePath);
+    stream.on('error', () => {
+      // A read error before any byte was sent gets a 500; after that, the response is cut short.
+      if (!res.headersSent) {
+        res.writeHead(500, ISOLATION_HEADERS);
+        res.end();
+      } else {
+        res.destroy();
+      }
+    });
+    stream.once('open', () => res.writeHead(200, { ...ISOLATION_HEADERS, 'Content-Type': contentTypeFor(filePath) }));
+    stream.pipe(res);
   });
   await new Promise((resolve, reject) => {
     server.on('error', reject);

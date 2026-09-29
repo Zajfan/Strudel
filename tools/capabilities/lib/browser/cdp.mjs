@@ -1,19 +1,42 @@
 // Minimal Chrome DevTools Protocol client: opens a page/tab and exposes evaluate/click/errors.
 const DEFAULT_SEND_TIMEOUT_MS = 30000;
 
+const OPEN_TIMEOUT_MS = 15000;
+
+// Closes a DevTools target (tab) by id and waits for Chromium to acknowledge it.
+async function closeTarget(port, targetId) {
+  const res = await fetch(`http://127.0.0.1:${port}/json/close/${targetId}`, { signal: AbortSignal.timeout(OPEN_TIMEOUT_MS) });
+  await res.text();
+}
+
 export async function openPage(port, url) {
-  const created = await fetch(`http://127.0.0.1:${port}/json/new?${url}`, { method: 'PUT' });
-  const { webSocketDebuggerUrl } = await created.json();
+  const created = await fetch(`http://127.0.0.1:${port}/json/new?${url}`, {
+    method: 'PUT',
+    signal: AbortSignal.timeout(OPEN_TIMEOUT_MS),
+  });
+  const { id: targetId, webSocketDebuggerUrl } = await created.json();
 
   const ws = new WebSocket(webSocketDebuggerUrl);
-  await new Promise((resolve, reject) => {
-    ws.addEventListener('open', () => resolve(), { once: true });
-    ws.addEventListener('error', (err) => reject(err), { once: true });
-  });
+  try {
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`CDP websocket did not open within ${OPEN_TIMEOUT_MS} ms`)), OPEN_TIMEOUT_MS);
+      ws.addEventListener('open', () => (clearTimeout(timer), resolve()), { once: true });
+      ws.addEventListener('error', (err) => (clearTimeout(timer), reject(err)), { once: true });
+    });
+  } catch (err) {
+    // The tab exists even though we could not attach to it: close it so it does not leak.
+    ws.close();
+    await closeTarget(port, targetId).catch(() => {});
+    throw err;
+  }
 
   let nextId = 1;
   const pending = new Map();
   const errors = [];
+  // console.warn / console.error text from the page. superdough reports dropped (past-due) haps only
+  // with a console.warn, so probes that score late starts need the warnings.
+  const warnings = [];
+  const consoleErrors = [];
 
   // Every CDP call is bounded: a per-call timer is cleared as soon as the call settles (by
   // response or by the ws closing), so a slow/never-answered call can't keep the event loop
@@ -48,7 +71,10 @@ export async function openPage(port, url) {
       else entry.resolve(msg.result);
       return;
     }
-    if (msg.method === 'Runtime.exceptionThrown') {
+    if (msg.method === 'Runtime.consoleAPICalled' && (msg.params?.type === 'warning' || msg.params?.type === 'error')) {
+      const text = (msg.params.args ?? []).map((a) => (a.value !== undefined ? String(a.value) : (a.description ?? ''))).join(' ');
+      (msg.params.type === 'warning' ? warnings : consoleErrors).push(text);
+    } else if (msg.method === 'Runtime.exceptionThrown') {
       const desc = msg.params?.exceptionDetails?.exception?.description ?? msg.params?.exceptionDetails?.text;
       errors.push(String(desc ?? 'unknown exception'));
     } else if (msg.method === 'Log.entryAdded' && msg.params?.entry?.level === 'error') {
@@ -87,11 +113,16 @@ export async function openPage(port, url) {
     await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 });
   }
 
-  function close() {
-    ws.close();
+  // Closes the tab (not just our connection to it), then the socket.
+  async function close() {
+    try {
+      await closeTarget(port, targetId);
+    } finally {
+      ws.close();
+    }
   }
 
-  return { evaluate, click, errors, close };
+  return { evaluate, click, errors, warnings, consoleErrors, close, targetId };
 }
 
 export async function waitForRepl(page, timeoutMs = 60000) {
