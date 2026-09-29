@@ -1,5 +1,5 @@
 // EXP-2 (CLI): a stem-export API exists, and per-orbit renders sum to the mix.
-import { stemResidual } from '../../lib/checks.mjs';
+import { isStemApiName, judgeStems, stemResidual } from '../../lib/checks.mjs';
 import { stemPattern } from '../../lib/patterns.mjs';
 import { renderPattern } from '../../lib/render.mjs';
 import { loadScope } from '../../lib/scope.mjs';
@@ -13,7 +13,7 @@ async function stemApis() {
   for (const [name, spec] of Object.entries(names)) {
     try {
       const m = await import(spec);
-      for (const k of Object.keys(m)) if (/stem/i.test(k)) apis.push(`${name}.${k}`);
+      for (const k of Object.keys(m)) if (isStemApiName(k)) apis.push(`${name}.${k}`);
     } catch (err) {
       skippedModules.push({ module: name, error: String(err?.message ?? err) });
     }
@@ -30,11 +30,12 @@ export async function probe({ thresholds }) {
   const { apis, skippedModules } = await stemApis();
   const metrics = { stemApis: apis, orbits: ORBITS.length, residualDbfs, headline: apis.length ? `${apis.length} stem API(s)` : 'no stem API' };
   const notes = skippedModules.length ? { skippedModules } : {};
-  if (mix.eventCount === 0) return { status: 'fail', metrics, notes: { ...notes, error: 'no events rendered' } };
-  if (thresholds.maxResidualDbfs == null) return { status: 'fail', metrics, notes: { ...notes, error: 'threshold maxResidualDbfs missing' } };
-  if (!apis.length) {
-    return { status: 'fail', metrics, notes: { ...notes, error: 'no stem export API', feasibility: `per-orbit renders sum to the mix at ${residualDbfs} dBFS` } };
+  // This probe renders per-orbit stems itself; it does not know how to drive a found API, so any
+  // API it finds is unexercised and the cell cannot pass on the API's name alone.
+  const verdict = judgeStems({ apis, exercised: false, residualDbfs, eventCount: mix.eventCount }, thresholds);
+  if (verdict.status === 'fail' && verdict.error === 'no stem export API') {
+    notes.feasibility = `per-orbit renders sum to the mix at ${residualDbfs} dBFS`;
   }
-  if (!(residualDbfs <= thresholds.maxResidualDbfs)) return { status: 'fail', metrics, notes: { ...notes, error: `stem residual ${residualDbfs} dBFS` } };
-  return { status: 'pass', metrics, notes };
+  const { status, error, reason } = verdict;
+  return { status, metrics, notes: { ...notes, ...(error && { error }), ...(reason && { reason }) } };
 }
