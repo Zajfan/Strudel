@@ -50,11 +50,19 @@ export function portReview(caps, resultsByTier) {
   return review;
 }
 
-function formatCell(level, result) {
+// A result is stale when it carries provenance for thresholds that no longer match capabilities.json.
+// Results with no `run` (old files, or fillMissing placeholders) are never marked.
+function isStale(result, currentThresholds) {
+  if (!result?.run) return false;
+  return JSON.stringify(result.run.thresholds ?? {}) !== JSON.stringify(currentThresholds);
+}
+
+function formatCell(level, result, currentThresholds) {
   if (level === 'n/a') return 'n/a';
   const status = result?.status ?? 'not-run';
   const headline = result?.metrics?.headline;
-  return `${level} · ${status}${headline ? ` (${headline})` : ''}`;
+  const stale = isStale(result, currentThresholds) ? ' ⚠ stale' : '';
+  return `${level} · ${status}${headline ? ` (${headline})` : ''}${stale}`;
 }
 
 export function renderMatrix(caps, resultsByTier) {
@@ -63,7 +71,9 @@ export function renderMatrix(caps, resultsByTier) {
   for (const tier of TIERS) lines.push(`| ${tier} | ${resultsByTier[tier]?.date ?? 'never run'} |`);
   lines.push('', '| ID | Capability | Browser | Desktop | CLI |', '|---|---|---|---|---|');
   for (const c of caps.capabilities) {
-    const cells = TIERS.map((tier) => formatCell(c.tiers[tier], resultsByTier[tier]?.results?.[c.id]));
+    const cells = TIERS.map((tier) =>
+      formatCell(c.tiers[tier], resultsByTier[tier]?.results?.[c.id], c.thresholds?.[tier] ?? {}),
+    );
     lines.push(`| ${c.id} | ${c.name} | ${cells.join(' | ')} |`);
   }
   lines.push('', '## Port review', '');

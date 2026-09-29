@@ -78,6 +78,29 @@ describe('renderMatrix', () => {
   });
 });
 
+describe('renderMatrix staleness', () => {
+  const capsWithThresholds = {
+    capabilities: [
+      { id: 'MIX-1', name: 'Buses', criterion: 'c', tiers: tiers('req', 'req', 'req'), thresholds: { cli: { minDuckDb: 6 } } },
+    ],
+  };
+  const result = (thresholds) => ({ status: 'pass', metrics: {}, notes: {}, run: { thresholds } });
+  it('marks a cell stale when run.thresholds differs from the current thresholds', () => {
+    const md = renderMatrix(capsWithThresholds, { cli: { date: 'd', results: { 'MIX-1': result({ minDuckDb: 3 }) } } });
+    expect(md).toContain('req · pass ⚠ stale');
+  });
+  it('does not mark a cell stale when run.thresholds equals the current thresholds', () => {
+    const md = renderMatrix(capsWithThresholds, { cli: { date: 'd', results: { 'MIX-1': result({ minDuckDb: 6 }) } } });
+    expect(md).not.toContain('stale');
+  });
+  it('does not mark a cell stale when the result has no run field', () => {
+    const md = renderMatrix(capsWithThresholds, {
+      cli: { date: 'd', results: { 'MIX-1': { status: 'pass', metrics: {}, notes: {} } } },
+    });
+    expect(md).not.toContain('stale');
+  });
+});
+
 describe('capabilities.json', () => {
   it('is valid and contains the spec rows', () => {
     const real = loadCapabilities(fileURLToPath(new URL('../capabilities.json', import.meta.url)));
