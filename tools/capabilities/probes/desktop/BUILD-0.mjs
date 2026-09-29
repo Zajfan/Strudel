@@ -4,9 +4,10 @@ import { join } from 'node:path';
 
 export async function probe({ repoRoot, thresholds, log }) {
   const manifest = join(repoRoot, 'src-tauri', 'Cargo.toml');
-  log(`cargo check --manifest-path ${manifest}`);
+  // --locked: never rewrite the tracked Cargo.lock; this is a type-check, not a dependency update.
+  log(`cargo check --locked --manifest-path ${manifest}`);
   const start = performance.now();
-  const run = spawnSync('cargo', ['check', '--manifest-path', manifest], {
+  const run = spawnSync('cargo', ['check', '--locked', '--manifest-path', manifest], {
     encoding: 'utf8',
     timeout: thresholds.timeoutMs,
     maxBuffer: 64 * 1024 * 1024,
@@ -16,7 +17,7 @@ export async function probe({ repoRoot, thresholds, log }) {
     return { status: 'not-run', metrics: {}, notes: { reason: 'cargo is not on PATH' } };
   }
   const logTail = (run.stderr ?? '').trim().split('\n').slice(-30).join('\n');
-  const metrics = { exitCode: run.status, seconds };
+  const metrics = { exitCode: run.status, seconds, scope: 'cargo check --locked (backend type-check only)' };
   if (run.error) {
     const headline = run.error.code === 'ETIMEDOUT' ? 'timed out' : `spawn error ${run.error.code ?? 'unknown'}`;
     return { status: 'fail', metrics: { ...metrics, headline }, notes: { error: String(run.error), logTail } };
