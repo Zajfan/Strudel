@@ -29,7 +29,7 @@
       "status": "fail",
       "metrics": {
         "events": 1115,
-        "rms": 0.09030958670680647,
+        "rms": 0.09027088171892372,
         "lengthSamples": 3120000,
         "expectedLength": 3120000,
         "firstDifferenceLeft": 1,
@@ -38,6 +38,17 @@
       },
       "notes": {
         "error": "renders differ from sample 1 (0.000 s). Suspect: Math.random() in supradough noise/supersaw oscillators"
+      },
+      "run": {
+        "ranAt": "2026-09-29T03:43:00.965Z",
+        "commit": "88d07cb4",
+        "dirty": true,
+        "source": "probe",
+        "node": "v22.21.1",
+        "platform": "linux-x64",
+        "thresholds": {
+          "minRms": 0.001
+        }
       }
     },
     "EXP-2": {
@@ -48,15 +59,28 @@
       }
     },
     "PERF-1": {
-      "status": "pass",
+      "status": "fail",
       "metrics": {
         "events": 1115,
         "audioSeconds": 65,
-        "renderSeconds": 14.533660634,
-        "realtimeFactor": 4.4723763432276105,
-        "headline": "4.5x real time"
+        "renderSeconds": 16.531423149999995,
+        "realtimeFactor": 3.931905886759666,
+        "headline": "3.9x real time"
       },
-      "notes": {}
+      "notes": {
+        "error": "3.93x < 4x"
+      },
+      "run": {
+        "ranAt": "2026-09-29T03:43:00.965Z",
+        "commit": "88d07cb4",
+        "dirty": true,
+        "source": "probe",
+        "node": "v22.21.1",
+        "platform": "linux-x64",
+        "thresholds": {
+          "minRealtimeFactor": 4
+        }
+      }
     },
     "PLUG-1": {
       "status": "not-run",
@@ -94,7 +118,16 @@
         "rms": 0.12695920809583505,
         "headline": "node v22.21.1"
       },
-      "notes": {}
+      "notes": {},
+      "run": {
+        "ranAt": "2026-09-29T03:43:00.965Z",
+        "commit": "88d07cb4",
+        "dirty": true,
+        "source": "probe",
+        "node": "v22.21.1",
+        "platform": "linux-x64",
+        "thresholds": {}
+      }
     }
   }
 }

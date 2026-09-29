@@ -92,11 +92,23 @@
       "status": "fail",
       "metrics": {
         "exitCode": 101,
-        "seconds": 2,
+        "seconds": 3,
+        "scope": "cargo check --locked (backend type-check only)",
         "headline": "cargo check failed"
       },
       "notes": {
         "logTail": "Updating crates.io index\nerror: failed to select a version for `memchr`.\n    ... required by package `regex v1.10.5`\n    ... which satisfies dependency `regex = \"^1.10.5\"` of package `urlpattern v0.3.0`\n    ... which satisfies dependency `urlpattern = \"^0.3\"` of package `tauri v2.0.0`\n    ... which satisfies dependency `tauri = \"^2.0.0\"` of package `tauri-plugin-clipboard-manager v2.0.0`\n    ... which satisfies dependency `tauri-plugin-clipboard-manager = \"^2\"` of package `app v0.1.0 (/run/media/zajferx/Data/dev/The-No-hands-Company/projects/Testing/StrudelLang/src-tauri)`\nversions that meet the requirements `^2.6.0` are: 2.8.3, 2.8.2, 2.8.1, 2.8.0, 2.7.6, 2.7.5, 2.7.4, 2.7.3, 2.7.2, 2.7.1, 2.7.0, 2.6.4, 2.6.3, 2.6.2, 2.6.1, 2.6.0\n\nall possible versions conflict with previously selected packages\n\n  previously selected package `memchr v2.5.0`\n    ... which satisfies dependency `memchr = \"^2\"` of package `tauri-utils v1.5.0`\n    ... which satisfies dependency `tauri-utils = \"^1.5.0\"` of package `tauri-build v1.4.1`\n    ... which satisfies dependency `tauri-build = \"^1.4.0\"` of package `app v0.1.0 (/run/media/zajferx/Data/dev/The-No-hands-Company/projects/Testing/StrudelLang/src-tauri)`\n\nfailed to select a version for `memchr` which could resolve this conflict"
+      },
+      "run": {
+        "ranAt": "2026-09-29T03:43:17.349Z",
+        "commit": "88d07cb4",
+        "dirty": true,
+        "source": "probe",
+        "node": "v22.21.1",
+        "platform": "linux-x64",
+        "thresholds": {
+          "timeoutMs": 1200000
+        }
       }
     }
   }
