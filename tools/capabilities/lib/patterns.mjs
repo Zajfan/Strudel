@@ -1,11 +1,24 @@
 // Test patterns built from Strudel globals only, so each builder can also run
 // in the browser page via fn.toString(). Call loadScope() first in Node.
-/* global arrange, note, sequence, pure, saw, stack */
+/* global arrange, note, sequence, pure, saw, silence, stack */
 
 export const ARRANGEMENT = { sections: 8, bars: 8 };
 
 export function arrangementPattern() {
   return arrange(...Array.from({ length: 8 }, (_, i) => [8, note(60 + i)]));
+}
+
+// ARR-1: the ways a user can write the 64-bar song with a hard ending. Bare arrange() loops;
+// the other two cut it off at bar 64. Self-contained (globals only, no references to other
+// module functions) so it also runs in the page via toString().
+export function arrangementCandidates() {
+  const sections = Array.from({ length: 8 }, (_, i) => [8, note(60 + i)]);
+  const bare = () => arrange(...sections);
+  return [
+    { name: 'arrange()', pattern: bare() },
+    { name: 'arrange() + filterWhen(t < 64)', pattern: bare().filterWhen((t) => t < 64) },
+    { name: 'arrange() + silence tail', pattern: arrange(...sections, [1e6, silence]) },
+  ];
 }
 
 export function tuningCases() {

@@ -1,27 +1,16 @@
-// ARR-1 (CLI): an 8-section, 64-bar arrangement with correct boundaries and a hard ending.
-import { checkArrangement } from '../../lib/checks.mjs';
-import { ARRANGEMENT, arrangementPattern } from '../../lib/patterns.mjs';
+// ARR-1 (CLI): an 8-section, 64-bar arrangement with correct boundaries and a hard ending. Every
+// candidate construct (bare arrange(), and arrange() cut off at bar 64) is checked; the cell
+// passes if any one of them gives the right sections and nothing after the end.
+import { checkArrangement, judgeArrangement } from '../../lib/checks.mjs';
+import { ARRANGEMENT, arrangementCandidates } from '../../lib/patterns.mjs';
 import { loadScope } from '../../lib/scope.mjs';
 
 export async function probe() {
   await loadScope();
   const { sections, bars } = ARRANGEMENT;
-  const haps = arrangementPattern()
-    .queryArc(0, sections * bars + bars)
-    .filter((h) => h.hasOnset());
-  const r = checkArrangement(haps, ARRANGEMENT);
-  const metrics = { sections, bars: sections * bars, ...r };
-  const notes = { construct: 'arrange()' };
-  if (r.eventsInSong === 0) return { status: 'fail', metrics: { ...metrics, headline: 'no events' }, notes };
-  if (r.wrongSection > 0) {
-    return { status: 'fail', metrics: { ...metrics, headline: 'wrong boundaries' }, notes: { ...notes, error: `${r.wrongSection} events in the wrong section` } };
-  }
-  if (r.eventsAfterEnd > 0) {
-    return {
-      status: 'fail',
-      metrics: { ...metrics, headline: 'no hard ending' },
-      notes: { ...notes, error: `arrange() loops: ${r.eventsAfterEnd} events after bar ${sections * bars}` },
-    };
-  }
-  return { status: 'pass', metrics: { ...metrics, headline: `${sections} sections, ${sections * bars} bars` }, notes };
+  const candidates = arrangementCandidates().map(({ name, pattern }) => {
+    const haps = pattern.queryArc(0, sections * bars + bars).filter((h) => h.hasOnset());
+    return { name, ...checkArrangement(haps, ARRANGEMENT) };
+  });
+  return judgeArrangement(candidates, ARRANGEMENT);
 }
