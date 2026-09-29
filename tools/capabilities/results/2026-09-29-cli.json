@@ -5,31 +5,171 @@
   "platform": "linux-x64",
   "results": {
     "ARR-1": {
-      "status": "not-run",
-      "metrics": {},
+      "status": "fail",
+      "metrics": {
+        "sections": 8,
+        "bars": 64,
+        "eventsInSong": 64,
+        "wrongSection": 0,
+        "eventsAfterEnd": 8,
+        "headline": "no hard ending"
+      },
       "notes": {
-        "reason": "no probe yet"
+        "construct": "arrange()",
+        "error": "arrange() loops: 8 events after bar 64"
+      },
+      "run": {
+        "ranAt": "2026-09-29T11:55:00.555Z",
+        "commit": "97f83047",
+        "dirty": true,
+        "source": "probe",
+        "node": "v22.21.1",
+        "platform": "linux-x64",
+        "thresholds": {}
       }
     },
     "MIX-1": {
-      "status": "not-run",
-      "metrics": {},
+      "status": "fail",
+      "metrics": {
+        "events": 2,
+        "beforeRms": 0.03585480478041702,
+        "afterRms": 0.03501576069556056,
+        "dropDb": 0.20567593333092768,
+        "headline": "0.2 dB duck"
+      },
       "notes": {
-        "reason": "no probe yet"
+        "engine": "supradough",
+        "scope": "ducking only; buses and sends are not separately observable in a stereo mix",
+        "error": "ducking 0.21 dB < 6 dB"
+      },
+      "run": {
+        "ranAt": "2026-09-29T11:55:00.555Z",
+        "commit": "97f83047",
+        "dirty": true,
+        "source": "probe",
+        "node": "v22.21.1",
+        "platform": "linux-x64",
+        "thresholds": {
+          "minDuckDb": 6
+        }
       }
     },
     "AUT-1": {
-      "status": "not-run",
-      "metrics": {},
+      "status": "fail",
+      "metrics": {
+        "events": 16,
+        "maxErrorMs": 0.08333333333333333,
+        "increasing": true,
+        "onsets": [
+          {
+            "expected": 0,
+            "found": 4,
+            "errorMs": 0.08333333333333333
+          },
+          {
+            "expected": 3000,
+            "found": 3003,
+            "errorMs": 0.0625
+          },
+          {
+            "expected": 6000,
+            "found": 6003,
+            "errorMs": 0.0625
+          },
+          {
+            "expected": 9000,
+            "found": 9002,
+            "errorMs": 0.041666666666666664
+          },
+          {
+            "expected": 12000,
+            "found": 12002,
+            "errorMs": 0.041666666666666664
+          },
+          {
+            "expected": 15000,
+            "found": 15002,
+            "errorMs": 0.041666666666666664
+          },
+          {
+            "expected": 18000,
+            "found": 18002,
+            "errorMs": 0.041666666666666664
+          },
+          {
+            "expected": 21000,
+            "found": 21002,
+            "errorMs": 0.041666666666666664
+          },
+          {
+            "expected": 24000,
+            "found": 24002,
+            "errorMs": 0.041666666666666664
+          },
+          {
+            "expected": 27000,
+            "found": 27001,
+            "errorMs": 0.020833333333333332
+          },
+          {
+            "expected": 30000,
+            "found": 30001,
+            "errorMs": 0.020833333333333332
+          },
+          {
+            "expected": 33000,
+            "found": 33001,
+            "errorMs": 0.020833333333333332
+          },
+          {
+            "expected": 36000,
+            "found": 36001,
+            "errorMs": 0.020833333333333332
+          },
+          {
+            "expected": 39000,
+            "found": 39001,
+            "errorMs": 0.020833333333333332
+          },
+          {
+            "expected": 42000,
+            "found": 42001,
+            "errorMs": 0.020833333333333332
+          },
+          {
+            "expected": 45000,
+            "found": 45001,
+            "errorMs": 0.020833333333333332
+          }
+        ],
+        "ramp": {
+          "firstRms": 0.0014142135636081431,
+          "lastRms": 0.0014142135636081431,
+          "changeDb": 0
+        },
+        "headline": "stepped only"
+      },
       "notes": {
-        "reason": "no probe yet"
+        "resolution": "measures onset timing of 16 stepped values per cycle, one per event",
+        "error": "automation is sampled once per event; no continuous ramp within a held note"
+      },
+      "run": {
+        "ranAt": "2026-09-29T11:55:00.555Z",
+        "commit": "97f83047",
+        "dirty": true,
+        "source": "probe",
+        "node": "v22.21.1",
+        "platform": "linux-x64",
+        "thresholds": {
+          "maxErrorMs": 1
+        }
       }
     },
     "EXP-1": {
       "status": "fail",
       "metrics": {
         "events": 1115,
-        "rms": 0.09027088171892372,
+        "rms": 0.09025460530019658,
         "lengthSamples": 3120000,
         "expectedLength": 3120000,
         "firstDifferenceLeft": 1,
@@ -40,8 +180,8 @@
         "error": "renders differ from sample 1 (0.000 s). Suspect: Math.random() in supradough noise/supersaw oscillators"
       },
       "run": {
-        "ranAt": "2026-09-29T03:43:00.965Z",
-        "commit": "88d07cb4",
+        "ranAt": "2026-09-29T11:55:00.555Z",
+        "commit": "97f83047",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
@@ -52,27 +192,48 @@
       }
     },
     "EXP-2": {
-      "status": "not-run",
-      "metrics": {},
+      "status": "fail",
+      "metrics": {
+        "stemApis": [],
+        "orbits": 4,
+        "residualDbfs": -169.13737204383435,
+        "headline": "no stem API"
+      },
       "notes": {
-        "reason": "no probe yet"
+        "skippedModules": [
+          {
+            "module": "@strudel/webaudio",
+            "error": "Cannot find module '/run/media/zajferx/Data/dev/The-No-hands-Company/projects/Testing/StrudelLang/packages/superdough/ola-processor' imported from /run/media/zajferx/Data/dev/The-No-hands-Company/projects/Testing/StrudelLang/packages/superdough/worklets.mjs"
+          }
+        ],
+        "error": "no stem export API",
+        "feasibility": "per-orbit renders sum to the mix at -169.13737204383435 dBFS"
+      },
+      "run": {
+        "ranAt": "2026-09-29T11:55:00.555Z",
+        "commit": "97f83047",
+        "dirty": true,
+        "source": "probe",
+        "node": "v22.21.1",
+        "platform": "linux-x64",
+        "thresholds": {
+          "maxResidualDbfs": -60
+        }
       }
     },
     "PERF-1": {
-      "status": "fail",
+      "status": "pass",
       "metrics": {
         "events": 1115,
         "audioSeconds": 65,
-        "renderSeconds": 16.531423149999995,
-        "realtimeFactor": 3.931905886759666,
-        "headline": "3.9x real time"
+        "renderSeconds": 14.752346520000003,
+        "realtimeFactor": 4.4060787151303975,
+        "headline": "4.4x real time"
       },
-      "notes": {
-        "error": "3.93x < 4x"
-      },
+      "notes": {},
       "run": {
-        "ranAt": "2026-09-29T03:43:00.965Z",
-        "commit": "88d07cb4",
+        "ranAt": "2026-09-29T11:55:00.555Z",
+        "commit": "97f83047",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
@@ -97,17 +258,85 @@
       }
     },
     "TUNE-1": {
-      "status": "not-run",
-      "metrics": {},
-      "notes": {
-        "reason": "no probe yet"
+      "status": "pass",
+      "metrics": {
+        "cases": [
+          {
+            "name": "19-EDO",
+            "count": 19,
+            "maxCents": 2.952118335527637e-7
+          },
+          {
+            "name": "12-tone just intonation",
+            "count": 12,
+            "maxCents": 2.459139827002702e-7
+          }
+        ],
+        "renderedFreq": 284.0066237181327,
+        "renderedCents": 0.0000010344708600954119,
+        "maxCents": 0.0000010344708600954119,
+        "headline": "max 0.000 cents"
+      },
+      "notes": {},
+      "run": {
+        "ranAt": "2026-09-29T11:55:00.555Z",
+        "commit": "97f83047",
+        "dirty": true,
+        "source": "probe",
+        "node": "v22.21.1",
+        "platform": "linux-x64",
+        "thresholds": {
+          "maxCents": 1
+        }
       }
     },
     "LANG-1": {
-      "status": "not-run",
-      "metrics": {},
+      "status": "fail",
+      "metrics": {
+        "cases": [
+          {
+            "name": "syntax",
+            "message": "Unexpected token (3:12)",
+            "expected": {
+              "line": 3,
+              "column": 12
+            },
+            "reported": {
+              "line": 3,
+              "column": 12,
+              "source": "loc"
+            },
+            "exact": true
+          },
+          {
+            "name": "unknown function",
+            "message": "note(...).s(...).notAFunction is not a function",
+            "expected": {
+              "line": 3,
+              "column": 3
+            },
+            "reported": {
+              "line": 3,
+              "column": 78,
+              "source": "stack"
+            },
+            "exact": false
+          }
+        ],
+        "exact": 1,
+        "headline": "1/2 exact"
+      },
       "notes": {
-        "reason": "no probe yet"
+        "error": "unknown function: reported {\"line\":3,\"column\":78,\"source\":\"stack\"}"
+      },
+      "run": {
+        "ranAt": "2026-09-29T11:55:00.555Z",
+        "commit": "97f83047",
+        "dirty": true,
+        "source": "probe",
+        "node": "v22.21.1",
+        "platform": "linux-x64",
+        "thresholds": {}
       }
     },
     "BUILD-0": {
@@ -120,8 +349,8 @@
       },
       "notes": {},
       "run": {
-        "ranAt": "2026-09-29T03:43:00.965Z",
-        "commit": "88d07cb4",
+        "ranAt": "2026-09-29T11:55:00.555Z",
+        "commit": "97f83047",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
