@@ -177,9 +177,10 @@ export function longestSilentRun(samples, threshold, from = 0, to = samples.leng
 // LIVE-1: the audio-level gap a failed evaluation causes, in excess of the pattern's own silence.
 // ownGapFrames is the longest near-silent run between the first note and the failure; the
 // longest run from the first note to the end of the recording, minus that, is the excess.
-// Without a note before the failure there is no baseline, so the excess is Infinity.
-export function liveGap(samples, { failureIndex, threshold = 1e-4 }) {
-  const firstNote = firstIndexAbove(samples, threshold, 0, failureIndex);
+// Without a note before the failure there is no baseline, so the excess is Infinity. `from` skips
+// audio before the pattern's first scheduled note (e.g. the tail of a previous recording).
+export function liveGap(samples, { failureIndex, threshold = 1e-4, from = 0 }) {
+  const firstNote = firstIndexAbove(samples, threshold, from, failureIndex);
   if (firstNote < 0) return { firstNote, ownGapFrames: null, longestGapFrames: null, excessFrames: Infinity };
   const ownGapFrames = longestSilentRun(samples, threshold, firstNote, failureIndex);
   const longestGapFrames = longestSilentRun(samples, threshold, firstNote);

@@ -1,85 +1,92 @@
-// LIVE-1 (browser): a failing evaluation mid-playback causes no audio gap > maxGapFrames; the
-// previous pattern keeps playing. Instruments AudioScheduledSourceNode.prototype.start the same
-// way as PERF-1, but only records OscillatorNode starts (the note's own oscillator) so that
-// superdough's internal ConstantSourceNode scheduling/cleanup timers (also
-// AudioScheduledSourceNode instances, see packages/superdough/helpers.mjs webAudioTimeout) don't
-// pollute the event-grid measurement.
-async function playThenBreak() {
-  // Constant is inlined (not module-level) because ctx.page.evaluate stringifies only this
-  // function; it has no closure over the rest of the module.
-  const SETTLE_MS = 3000;
-  const protoStart = AudioScheduledSourceNode.prototype.start;
-  const starts = [];
-  AudioScheduledSourceNode.prototype.start = function (when = 0, ...rest) {
-    if (this instanceof OscillatorNode) {
-      starts.push({ when, now: this.context.currentTime, freq: this.frequency.value, sampleRate: this.context.sampleRate });
-    }
-    return protoStart.call(this, when, ...rest);
+// LIVE-1 (browser): a failing evaluation mid-playback causes no audio gap > maxGapFrames and the
+// previous pattern keeps playing. Three failure kinds are tried in turn against the same steady
+// pattern (playback is stopped between cases): a syntax error, a throw while the code is evaluated,
+// and a throw while the scheduler queries the new pattern. Each case is recorded from the master
+// mix with recordLive (an AudioWorklet tap, lib/browser/page-recorder.mjs). The gap is measured on
+// the audio: the longest near-silent run after the first note, in excess of the pattern's own
+// silence between notes (liveGap). Only OscillatorNode starts are logged, so superdough's
+// ConstantSourceNode cleanup timers (packages/superdough/helpers.mjs webAudioTimeout) don't count.
+import { recordLive } from '../../lib/browser/page-recorder.mjs';
+import { liveGap } from '../../lib/checks.mjs';
+
+const SETTLE_SECONDS = 3;
+const STEADY = 'note("c4").s("sine").fast(8).gain(0.05).release(0.01)';
+// The failing programs use e4, so if one of them replaced the steady pattern the pitch would change.
+const CASES = [
+  { name: 'syntax error', code: 'note("e4").s("sine").fast(8).gain(0.05).release(0.01).lpf(800 +)' },
+  { name: 'eval-time throw', code: 'note("e4").s("sine").fast(8).gain(0.05).release(0.01); throw new Error("boom")' },
+  {
+    name: 'query-time throw',
+    code: 'note("e4").s("sine").fast(8).gain(0.05).release(0.01).fmap(() => { throw new Error("q") })',
+  },
+];
+
+async function runCase(page, c) {
+  const live = await recordLive(page, [
+    { code: STEADY, seconds: SETTLE_SECONDS },
+    { code: c.code, seconds: SETTLE_SECONDS },
+  ]);
+  const { left, sampleRate, startFrame, starts, steps, log } = live;
+  const failAt = steps[1].at;
+  const failureIndex = Math.round(failAt * sampleRate) - startFrame;
+  const before = starts.filter((s) => s.now < failAt);
+  const after = starts.filter((s) => s.now >= failAt);
+  const preFreq = before.length ? before.at(-1).freq : null;
+  const sameFrequencyAfter = after.length > 0 && preFreq != null && after.every((s) => Math.abs(s.freq - preFreq) < 0.5);
+  const logErrors = log.filter((l) => l.time >= failAt && (l.type === 'error' || /error/i.test(l.message))).map((l) => l.message);
+  const errorMessage = steps[1].errorAfterEval || steps[1].errorAfterWait || logErrors[0] || '';
+  // Start the baseline at the steady pattern's first scheduled note: the recording can open on the
+  // tail of the previous case's notes, and the hole between the two is not the pattern's own gap.
+  const firstStartIndex = before.length ? Math.max(0, Math.round(before[0].when * sampleRate) - startFrame) : failureIndex;
+  const gap = liveGap(left, { failureIndex, from: firstStartIndex });
+  return {
+    name: c.name,
+    steadyError: steps[0].errorAfterWait,
+    errorReported: !!errorMessage,
+    errorMessage,
+    startsBefore: before.length,
+    startsAfter: after.length,
+    sameFrequencyAfter,
+    recordedSamples: left.length,
+    failureIndex,
+    firstNote: gap.firstNote,
+    ownGapFrames: gap.ownGapFrames,
+    longestGapFrames: gap.longestGapFrames,
+    gapExcessFrames: gap.excessFrames,
   };
-  try {
-    const m = window.strudelMirror;
-    m.setCode('note("c4").s("sine").fast(8).gain(0.05).release(0.01)');
-    await m.evaluate();
-    await new Promise((r) => setTimeout(r, SETTLE_MS));
-    const splitIndex = starts.length;
-    const cps = m.repl.scheduler.cps;
-    // This evaluate is expected to fail (trailing `+` with no right-hand side); the REPL's
-    // evaluate() catches the error internally and sets repl.state.error rather than throwing.
-    m.setCode('note("c4").s("sine").fast(8).gain(0.05).release(0.01).lpf(800 +)');
-    await m.evaluate();
-    const errorMessage = String(m.repl.state.error || '');
-    await new Promise((r) => setTimeout(r, SETTLE_MS));
-    m.stop();
-    return { starts, splitIndex, cps, errorMessage };
-  } finally {
-    AudioScheduledSourceNode.prototype.start = protoStart;
-  }
+}
+
+function caseProblem(r, maxGapFrames) {
+  if (r.steadyError) return `steady pattern failed: ${r.steadyError}`;
+  if (r.startsBefore === 0) return 'no oscillator starts before the failure';
+  if (!r.errorReported) return 'the failure was not reported';
+  if (!(r.startsAfter > 0)) return 'no starts after the failure';
+  if (!r.sameFrequencyAfter) return 'pitch changed after the failure (the failing code replaced the pattern)';
+  if (!(r.gapExcessFrames <= maxGapFrames)) return `audio gap ${r.gapExcessFrames} frames beyond the pattern's own ${r.ownGapFrames}`;
+  return null;
 }
 
 export async function probe({ page, thresholds }) {
   const notes = {
-    scope: 'headless Chromium, fake audio device: measures scheduling lateness and rendered signal, not DAC underruns',
+    scope: 'headless Chromium, fake audio device: measures the rendered master mix and Web Audio scheduling, not DAC underruns',
+    gap: 'longest run of |x| < 1e-4 after the first note, minus the longest such run before the failure (the pattern own silence)',
   };
   const maxGapFrames = thresholds.maxGapFrames;
   if (maxGapFrames == null) return { status: 'fail', metrics: {}, notes: { ...notes, error: 'threshold maxGapFrames missing' } };
 
-  const result = await page.evaluate(playThenBreak, undefined, { timeoutMs: 30000 });
-  const { starts, splitIndex, cps, errorMessage } = result;
-  const errorReported = !!errorMessage;
-  const startsBefore = splitIndex;
-  const startsAfter = starts.length - splitIndex;
-  const preFreq = splitIndex > 0 ? starts[splitIndex - 1].freq : null;
-  const afterStarts = starts.slice(splitIndex);
-  const sameFrequencyAfter = startsAfter > 0 && preFreq != null && afterStarts.every((s) => Math.abs(s.freq - preFreq) < 0.5);
-  const sampleRate = starts.length ? starts[0].sampleRate : null;
-  const grid = cps > 0 ? 1 / (cps * 8) : null;
-  let maxDeviationS = 0;
-  if (grid != null) {
-    for (let i = 1; i < starts.length; i++) {
-      const delta = starts[i].when - starts[i - 1].when;
-      const deviation = Math.abs(delta - grid);
-      if (deviation > maxDeviationS) maxDeviationS = deviation;
-    }
-  }
-  const maxGapFramesMeasured = sampleRate != null && grid != null ? maxDeviationS * sampleRate : null;
-
+  const cases = [];
+  for (const c of CASES) cases.push(await runCase(page, c));
+  const problems = cases.map((r) => ({ name: r.name, problem: caseProblem(r, maxGapFrames) })).filter((p) => p.problem);
+  const worstExcess = Math.max(...cases.map((r) => r.gapExcessFrames));
   const metrics = {
-    errorReported,
-    startsBefore,
-    startsAfter,
-    maxGapFrames: maxGapFramesMeasured,
-    sameFrequencyAfter,
-    cps,
-    grid,
-    headline: `${startsAfter} after error, ${maxGapFramesMeasured == null ? 'n/a' : maxGapFramesMeasured.toFixed(1)} frame gap`,
+    cases,
+    maxGapExcessFrames: worstExcess,
+    headline: problems.length
+      ? `${cases.length - problems.length}/${cases.length} cases safe; ${problems.map((p) => p.name).join(', ')} not`
+      : `${cases.length}/${cases.length} cases safe, ${worstExcess} frame gap`,
   };
-
-  if (starts.length === 0) return { status: 'fail', metrics, notes: { ...notes, error: 'no oscillator starts recorded' } };
-  if (!errorReported) return { status: 'fail', metrics, notes: { ...notes, error: 'evaluate did not report an error' } };
-  if (!(startsAfter > 0)) return { status: 'fail', metrics, notes: { ...notes, error: 'no starts after the failed evaluate' } };
-  if (!sameFrequencyAfter) return { status: 'fail', metrics, notes: { ...notes, error: 'oscillator frequency changed after the failed evaluate' } };
-  if (maxGapFramesMeasured == null || !(maxGapFramesMeasured <= maxGapFrames)) {
-    return { status: 'fail', metrics, notes: { ...notes, error: `gap ${maxGapFramesMeasured} frames > ${maxGapFrames}` } };
+  if (problems.length) {
+    return { status: 'fail', metrics, notes: { ...notes, error: problems.map((p) => `${p.name}: ${p.problem}`).join('; ') } };
   }
   return { status: 'pass', metrics, notes };
 }

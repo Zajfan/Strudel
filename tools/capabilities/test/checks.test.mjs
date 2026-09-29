@@ -198,6 +198,17 @@ describe('liveGap', () => {
     expect(r.longestGapFrames).toBe(1520 - 870);
     expect(r.excessFrames).toBe(1520 - 870 - 50);
   });
+  it('starts the baseline at `from`, ignoring leftover audio before it', () => {
+    // leftover sound in [0, 10), then silence until the pattern starts at 20
+    const x = signal(1520);
+    for (let i = 0; i < 10; i++) x[i] = 0.5;
+    expect(liveGap(x, { failureIndex: 760 }).ownGapFrames).toBe(50); // leftover gap (10) < own gap
+    const long = signal(1520);
+    for (let i = 0; i < 10; i++) long[i] = 0.5;
+    for (let i = 20; i < 170; i++) long[i] = 0; // first burst missing: 160-sample hole after the leftover
+    expect(liveGap(long, { failureIndex: 760 }).ownGapFrames).toBe(160);
+    expect(liveGap(long, { failureIndex: 760, from: 150 })).toMatchObject({ firstNote: 170, ownGapFrames: 50 });
+  });
   it('is Infinity (fails closed) when there is no note before the failure', () => {
     expect(liveGap(new Float32Array(1000), { failureIndex: 500 }).excessFrames).toBe(Infinity);
   });
