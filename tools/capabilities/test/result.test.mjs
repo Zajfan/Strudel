@@ -45,4 +45,9 @@ describe('runProbe', () => {
     const r = await runProbe(async (ctx) => ({ status: 'pass', metrics: { tier: ctx.tier } }), { tier: 'cli' });
     expect(r).toEqual({ status: 'pass', metrics: { tier: 'cli' }, notes: {} });
   });
+  it('records fail when the probe function\'s own dynamic import rejects', async () => {
+    const r = await runProbe(async (c) => (await import('./does-not-exist.mjs')).probe(c), {});
+    expect(r.status).toBe('fail');
+    expect(r.notes.error).toMatch(/does-not-exist/);
+  });
 });
