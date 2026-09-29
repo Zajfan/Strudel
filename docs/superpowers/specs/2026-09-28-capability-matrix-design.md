@@ -83,7 +83,7 @@ the same commit, never inside a probe.
 | PERF-1 | Voice capacity | Sustained polyphony (saw + filter + envelope) for 60 s with 0 late starts: Browser ≥ 64, Desktop ≥ 256; CLI renders the reference song ≥ 4× real time | req | req | req |
 | LIVE-1 | Safe live swap | A failing evaluation mid-playback causes no audio gap > 1 render quantum (128 frames); the previous pattern continues | req | req | n/a |
 | CUE-1 | Headphone cue | A pattern can be routed to a second output device, inaudible on the main output | opt | req | n/a |
-| PLUG-1 | Third-party plugin | Load a CLAP or VST3 instrument, play notes from a pattern, and capture non-silent output | n/a | req | opt |
+| PLUG-1 | Third-party plugin | Load a CLAP or VST3 instrument, play notes from a pattern, and capture non-silent output (RMS ≥ 0.001; minRms applies to desktop) | n/a | req | opt |
 | SYNC-1 | External clock | MIDI clock-out jitter < 2 ms over 60 s | opt | req | opt |
 | TUNE-1 | Microtonal | 19-EDO and a just-intonation scale usable in pattern code; pitches within ±1 cent | req | req | req |
 | LANG-1 | Error quality | A syntax error and an unknown function each report the exact line and column | req | req | req |
@@ -99,7 +99,7 @@ All under `tools/capabilities/`. None of this is application code.
 ```
 capabilities.json        # matrix spec: id, criterion, thresholds, per-tier req/opt/n/a
 probes/cli/<ID>.mjs      # Node probes
-probes/browser/<ID>.js   # page scripts in the tools/baseline style
+probes/browser/<ID>.mjs  # Node modules that drive the page over CDP (ctx.page)
 probes/desktop/<ID>.mjs  # drive cargo / the Tauri app / native spikes
 run.mjs                  # node tools/capabilities/run.mjs --tier cli|browser|desktop [--only ID]
 results/<date>-<tier>.json

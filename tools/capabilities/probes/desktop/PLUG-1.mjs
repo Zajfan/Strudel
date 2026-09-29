@@ -128,9 +128,16 @@ export async function probe({ repoRoot, thresholds, tmpDir, log }) {
       notes: { ...baseNotes, logTail },
     };
   }
-  // Fail-closed: a missing, non-numeric or zero RMS is silence, never a pass.
-  if (!(typeof out.rms === 'number' && out.rms > 0)) {
-    return { status: 'fail', metrics: { ...rendered, headline: 'silent output' }, notes: { ...baseNotes, logTail } };
+  // Fail-closed: a missing threshold, or a missing, non-numeric or too-quiet RMS, is never a pass.
+  if (thresholds.minRms == null) {
+    return { status: 'fail', metrics: rendered, notes: { ...baseNotes, error: 'threshold minRms missing', logTail } };
+  }
+  if (!(typeof out.rms === 'number' && out.rms >= thresholds.minRms)) {
+    return {
+      status: 'fail',
+      metrics: { ...rendered, headline: 'silent output' },
+      notes: { ...baseNotes, error: `rms ${out.rms} below ${thresholds.minRms}`, logTail },
+    };
   }
   // The spec names Surge XT; a different instrument behind that file name is not evidence for it.
   if (!/surge/i.test(`${out.pluginId} ${out.pluginName}`)) {
