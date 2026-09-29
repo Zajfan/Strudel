@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkArrangement, checkTuning, locateError } from '../lib/checks.mjs';
+import { analyzeSteps, checkArrangement, checkTuning, duckDrop, locateError, stemResidual } from '../lib/checks.mjs';
 
 const hap = (begin, note) => ({ whole: { begin }, value: { note } });
 
@@ -37,5 +37,38 @@ describe('locateError', () => {
   });
   it('returns null when nothing locates the error', () => {
     expect(locateError({ message: 'x', stack: 'at <anonymous>:9:1' }, 3)).toBeNull();
+  });
+});
+
+describe('analyzeSteps', () => {
+  it('finds onsets on the grid and a rising level', () => {
+    const sr = 1600;
+    const x = new Float32Array(sr);
+    for (let k = 0; k < 16; k++) for (let i = 0; i < 50; i++) x[k * 100 + i] = 0.1 * (k + 1) * (i % 2 ? 1 : -1);
+    const r = analyzeSteps(x, sr, { steps: 16, cps: 1 });
+    expect(r.maxErrorMs).toBe(0);
+    expect(r.increasing).toBe(true);
+  });
+  it('reports Infinity when an onset is missing', () => {
+    expect(analyzeSteps(new Float32Array(1600), 1600, { steps: 16, cps: 1 }).maxErrorMs).toBe(Infinity);
+  });
+});
+
+describe('duckDrop', () => {
+  it('measures the level drop after the trigger in dB', () => {
+    const sr = 1000;
+    const x = new Float32Array(sr).map((_, i) => (i < 250 ? 1 : 0.5) * (i % 2 ? 1 : -1));
+    expect(duckDrop(x, sr, { cps: 1, triggerAt: 0.25 }).dropDb).toBeCloseTo(6.0206, 3);
+  });
+});
+
+describe('stemResidual', () => {
+  it('is -Infinity when stems sum exactly to the mix', () => {
+    const a = Float32Array.from([0.5, -0.25]);
+    const b = Float32Array.from([0.25, 0.25]);
+    expect(stemResidual(Float32Array.from([0.75, 0]), [a, b]).residualDbfs).toBe(-Infinity);
+  });
+  it('reports the worst sample difference in dBFS', () => {
+    expect(stemResidual(Float32Array.from([0.1]), [Float32Array.from([0])]).residualDbfs).toBeCloseTo(-20, 6);
   });
 });

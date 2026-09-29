@@ -1,6 +1,6 @@
 // Test patterns built from Strudel globals only, so each builder can also run
 // in the browser page via fn.toString(). Call loadScope() first in Node.
-/* global arrange, note, sequence, pure */
+/* global arrange, note, sequence, pure, saw, stack */
 
 export const ARRANGEMENT = { sections: 8, bars: 8 };
 
@@ -35,3 +35,27 @@ export const ERROR_CASES = [
   { name: 'syntax', code: 'note("c e g")\n  .s("sine")\n  .lpf(800 +)\n', line: 3, column: 12 },
   { name: 'unknown function', code: 'note("c e g")\n  .s("sine")\n  .notAFunction(2)\n', line: 3, column: 3 },
 ];
+
+export const AUTOMATION = { steps: 16, cps: 1 };
+
+export function automationPattern() {
+  return note(69).s('sine').fast(16).clip(0.5).attack(0).release(0.002).gain(saw.range(0.2, 1));
+}
+
+export const DUCK = { cps: 1, triggerAt: 0.25 };
+
+export function duckPattern() {
+  return stack(
+    note(48).s('sine').orbit(1).gain(0.5).attack(0).release(0.01).clip(1),
+    note(72).s('sine').orbit(2).gain(0).struct('~ x ~ ~').duckorbit(1).duckdepth(1).duckattack(0.1),
+  );
+}
+
+export function stemPattern() {
+  return stack(
+    note(48).s('sine').orbit(1).gain(0.3),
+    note(67).s('triangle').orbit(2).gain(0.3).fast(2),
+    note(72).s('sine').orbit(3).gain(0.2).fast(4),
+    note(55).s('square').orbit(4).gain(0.1),
+  );
+}

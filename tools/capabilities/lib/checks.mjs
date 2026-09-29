@@ -1,5 +1,5 @@
 // Pure checks shared by the CLI and browser probes. No Strudel imports.
-import { cents } from './measure.mjs';
+import { cents, firstIndexAbove, toDb, windowRms } from './measure.mjs';
 
 export function checkArrangement(haps, { sections, bars }) {
   const end = sections * bars;
@@ -36,4 +36,39 @@ export function locateError(err, userLineCount) {
     if (Number(line) <= userLineCount) return { line: Number(line), column: Number(column), source: 'stack' };
   }
   return null;
+}
+
+export function analyzeSteps(samples, sampleRate, { steps, cps }) {
+  const stepLen = sampleRate / (steps * cps);
+  const slack = Math.round(0.005 * sampleRate);
+  const onsets = [];
+  const rms = [];
+  let maxErrorMs = 0;
+  for (let k = 0; k < steps; k++) {
+    const expected = Math.round(k * stepLen);
+    const found = firstIndexAbove(samples, 1e-4, expected - slack, expected + slack);
+    const errorMs = found < 0 ? Infinity : (Math.abs(found - expected) / sampleRate) * 1000;
+    maxErrorMs = Math.max(maxErrorMs, errorMs);
+    onsets.push({ expected, found, errorMs });
+    rms.push(windowRms(samples, expected + stepLen / 8, expected + (3 * stepLen) / 8));
+  }
+  const increasing = rms.every((v, k) => k === 0 || v > rms[k - 1]);
+  return { onsets, maxErrorMs, rms, increasing };
+}
+
+export function duckDrop(samples, sampleRate, { triggerAt }) {
+  const at = (s) => Math.round(s * sampleRate);
+  const beforeRms = windowRms(samples, at(triggerAt - 0.05), at(triggerAt - 0.01));
+  const afterRms = windowRms(samples, at(triggerAt + 0.005), at(triggerAt + 0.025));
+  return { beforeRms, afterRms, dropDb: -toDb(afterRms / beforeRms) };
+}
+
+export function stemResidual(mix, stems) {
+  let worst = 0;
+  for (let i = 0; i < mix.length; i++) {
+    let sum = 0;
+    for (const stem of stems) sum += stem[i] ?? 0;
+    worst = Math.max(worst, Math.abs(mix[i] - sum));
+  }
+  return { residualDbfs: toDb(worst) };
 }
