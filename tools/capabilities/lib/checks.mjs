@@ -63,6 +63,11 @@ export function duckDrop(samples, sampleRate, { triggerAt }) {
   return { beforeRms, afterRms, dropDb: -toDb(afterRms / beforeRms) };
 }
 
+// Detection floor for "did the level change at all within the note" (used with rampWithinNote), not
+// a spec threshold: a continuous ramp from 0.1 to 1 clears this by a wide margin, while a value
+// sampled once per event (and held for the rest of the note) stays near 0 dB.
+export const RAMP_DETECTION_DB = 3;
+
 // RMS in two windows within the first cycle (a continuous ramp should differ; a value sampled
 // once per event should not). Windows are fractions of the cycle length so they scale with cps.
 export function rampWithinNote(samples, sampleRate, { cps }) {
