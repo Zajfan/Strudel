@@ -5,22 +5,39 @@
   "platform": "linux-x64",
   "results": {
     "ARR-1": {
-      "status": "fail",
+      "status": "pass",
       "metrics": {
         "sections": 8,
         "bars": 64,
-        "eventsInSong": 64,
-        "wrongSection": 0,
-        "eventsAfterEnd": 8,
-        "headline": "no hard ending"
+        "candidates": [
+          {
+            "name": "arrange()",
+            "eventsInSong": 64,
+            "wrongSection": 0,
+            "eventsAfterEnd": 8
+          },
+          {
+            "name": "arrange() + filterWhen(t < 64)",
+            "eventsInSong": 64,
+            "wrongSection": 0,
+            "eventsAfterEnd": 0
+          },
+          {
+            "name": "arrange() + silence tail",
+            "eventsInSong": 64,
+            "wrongSection": 0,
+            "eventsAfterEnd": 0
+          }
+        ],
+        "headline": "8 sections, 64 bars via arrange() + filterWhen(t < 64)"
       },
       "notes": {
-        "construct": "arrange()",
-        "error": "arrange() loops: 8 events after bar 64"
+        "ergonomics": "bare arrange() loops: 8 events after bar 64; a hard ending needs an extra construct (filterWhen or a silence tail)",
+        "construct": "arrange() + filterWhen(t < 64)"
       },
       "run": {
-        "ranAt": "2026-09-29T11:55:00.555Z",
-        "commit": "97f83047",
+        "ranAt": "2026-09-29T12:17:18.424Z",
+        "commit": "96df6ef6",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
@@ -43,8 +60,8 @@
         "error": "ducking 0.21 dB < 6 dB"
       },
       "run": {
-        "ranAt": "2026-09-29T11:55:00.555Z",
-        "commit": "97f83047",
+        "ranAt": "2026-09-29T12:17:18.424Z",
+        "commit": "96df6ef6",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
@@ -154,8 +171,8 @@
         "error": "automation is sampled once per event; no continuous ramp within a held note"
       },
       "run": {
-        "ranAt": "2026-09-29T11:55:00.555Z",
-        "commit": "97f83047",
+        "ranAt": "2026-09-29T12:17:18.424Z",
+        "commit": "96df6ef6",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
@@ -169,7 +186,7 @@
       "status": "fail",
       "metrics": {
         "events": 1115,
-        "rms": 0.09025460530019658,
+        "rms": 0.09022458557134133,
         "lengthSamples": 3120000,
         "expectedLength": 3120000,
         "firstDifferenceLeft": 1,
@@ -180,8 +197,8 @@
         "error": "renders differ from sample 1 (0.000 s). Suspect: Math.random() in supradough noise/supersaw oscillators"
       },
       "run": {
-        "ranAt": "2026-09-29T11:55:00.555Z",
-        "commit": "97f83047",
+        "ranAt": "2026-09-29T12:17:18.424Z",
+        "commit": "96df6ef6",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
@@ -206,12 +223,12 @@
             "error": "Cannot find module '/run/media/zajferx/Data/dev/The-No-hands-Company/projects/Testing/StrudelLang/packages/superdough/ola-processor' imported from /run/media/zajferx/Data/dev/The-No-hands-Company/projects/Testing/StrudelLang/packages/superdough/worklets.mjs"
           }
         ],
-        "error": "no stem export API",
-        "feasibility": "per-orbit renders sum to the mix at -169.13737204383435 dBFS"
+        "feasibility": "per-orbit renders sum to the mix at -169.13737204383435 dBFS",
+        "error": "no stem export API"
       },
       "run": {
-        "ranAt": "2026-09-29T11:55:00.555Z",
-        "commit": "97f83047",
+        "ranAt": "2026-09-29T12:17:18.424Z",
+        "commit": "96df6ef6",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
@@ -226,14 +243,14 @@
       "metrics": {
         "events": 1115,
         "audioSeconds": 65,
-        "renderSeconds": 14.752346520000003,
-        "realtimeFactor": 4.4060787151303975,
+        "renderSeconds": 14.858897023999997,
+        "realtimeFactor": 4.374483509443023,
         "headline": "4.4x real time"
       },
       "notes": {},
       "run": {
-        "ranAt": "2026-09-29T11:55:00.555Z",
-        "commit": "97f83047",
+        "ranAt": "2026-09-29T12:17:18.424Z",
+        "commit": "96df6ef6",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
@@ -279,8 +296,8 @@
       },
       "notes": {},
       "run": {
-        "ranAt": "2026-09-29T11:55:00.555Z",
-        "commit": "97f83047",
+        "ranAt": "2026-09-29T12:17:18.424Z",
+        "commit": "96df6ef6",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
@@ -317,7 +334,7 @@
             },
             "reported": {
               "line": 3,
-              "column": 78,
+              "column": 77,
               "source": "stack"
             },
             "exact": false
@@ -327,11 +344,11 @@
         "headline": "1/2 exact"
       },
       "notes": {
-        "error": "unknown function: reported {\"line\":3,\"column\":78,\"source\":\"stack\"}"
+        "error": "unknown function: reported {\"line\":3,\"column\":77,\"source\":\"stack\"}"
       },
       "run": {
-        "ranAt": "2026-09-29T11:55:00.555Z",
-        "commit": "97f83047",
+        "ranAt": "2026-09-29T12:17:18.424Z",
+        "commit": "96df6ef6",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
@@ -349,8 +366,8 @@
       },
       "notes": {},
       "run": {
-        "ranAt": "2026-09-29T11:55:00.555Z",
-        "commit": "97f83047",
+        "ranAt": "2026-09-29T12:17:18.424Z",
+        "commit": "96df6ef6",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
