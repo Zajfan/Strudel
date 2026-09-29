@@ -18,6 +18,35 @@ export function checkArrangement(haps, { sections, bars }) {
   return { eventsInSong, wrongSection, eventsAfterEnd };
 }
 
+// ARR-1 verdict shared by the CLI and browser probes. candidates: [{ name, ...checkArrangement() }].
+// Passes if any candidate construct has events, all in the right section, and none after the end.
+export function judgeArrangement(candidates, { sections, bars }) {
+  const end = sections * bars;
+  const ok = (c) => c.eventsInSong > 0 && c.wrongSection === 0 && c.eventsAfterEnd === 0;
+  const bare = candidates.find((c) => c.name === 'arrange()');
+  const notes = {};
+  if (bare?.eventsAfterEnd > 0) {
+    notes.ergonomics = `bare arrange() loops: ${bare.eventsAfterEnd} events after bar ${end}; a hard ending needs an extra construct (filterWhen or a silence tail)`;
+  }
+  const metrics = { sections, bars: end, candidates };
+  const passing = candidates.find(ok);
+  if (passing) {
+    return {
+      status: 'pass',
+      metrics: { ...metrics, headline: `${sections} sections, ${end} bars via ${passing.name}` },
+      notes: { ...notes, construct: passing.name },
+    };
+  }
+  const summary = candidates
+    .map((c) => `${c.name}: ${c.eventsInSong} in song, ${c.wrongSection} wrong section, ${c.eventsAfterEnd} after bar ${end}`)
+    .join('; ');
+  return {
+    status: 'fail',
+    metrics: { ...metrics, headline: `no construct ends at bar ${end}` },
+    notes: { ...notes, error: summary || 'no candidate constructs' },
+  };
+}
+
 export function checkTuning(values, expected) {
   if (values.length !== expected.length) return { count: values.length, maxCents: Infinity };
   let maxCents = 0;
@@ -32,8 +61,10 @@ export function locateError(err, userLineCount) {
   if (err?.loc) return { line: err.loc.line, column: err.loc.column, source: 'loc' };
   const fromMessage = /\((\d+):(\d+)\)\s*$/.exec(err?.message ?? '');
   if (fromMessage) return { line: Number(fromMessage[1]), column: Number(fromMessage[2]), source: 'message' };
+  // V8 stack columns are 1-based; acorn's loc and the '(line:column)' message suffix are 0-based.
+  // Convert so every source reports the same 0-based column that ERROR_CASES expects.
   for (const [, line, column] of String(err?.stack ?? '').matchAll(/<anonymous>:(\d+):(\d+)/g)) {
-    if (Number(line) <= userLineCount) return { line: Number(line), column: Number(column), source: 'stack' };
+    if (Number(line) <= userLineCount) return { line: Number(line), column: Number(column) - 1, source: 'stack' };
   }
   return null;
 }
@@ -90,4 +121,67 @@ export function stemResidual(mix, stems) {
     worst = Math.max(worst, Math.abs(mix[i] - sum));
   }
   return { residualDbfs: toDb(worst) };
+}
+
+// EXP-2: does an exported name look like a stem API? Matches 'stem'/'stems' as a word of the
+// camelCase- or snake_case-split name ('renderStems', 'STEM_EXPORT'), not as a substring of
+// another word ('system', 'ecosystem', 'stemmer').
+export function isStemApiName(name) {
+  const words = String(name).replace(/([a-z0-9])([A-Z])/g, '$1 $2');
+  return /(^|[^a-z])stems?([^a-z]|$)/i.test(words);
+}
+
+// EXP-2 verdict shared by the CLI and browser probes. An API that is found but not driven by the
+// probe can never pass: its name is not evidence that it exports stems.
+export function judgeStems({ apis, exercised, residualDbfs, eventCount }, thresholds) {
+  if (!(eventCount > 0)) return { status: 'fail', error: 'no events rendered' };
+  if (thresholds?.maxResidualDbfs == null) return { status: 'fail', error: 'threshold maxResidualDbfs missing' };
+  if (!apis?.length) return { status: 'fail', error: 'no stem export API' };
+  if (!exercised) return { status: 'not-run', reason: `stem-like API found but not exercised: ${apis.join(', ')}` };
+  if (!(residualDbfs <= thresholds.maxResidualDbfs)) {
+    return { status: 'fail', error: `stem residual ${residualDbfs} dBFS > ${thresholds.maxResidualDbfs} dBFS` };
+  }
+  return { status: 'pass' };
+}
+
+// PERF-1 (browser): the fewest note starts V voices must produce in durationS at cps, allowing one
+// partial cycle at each end of the measurement window. NaN (fails any >= check) on missing input.
+export function expectedMinStarts({ voices, durationS, cps }) {
+  const cycles = Math.floor(durationS * cps) - 1;
+  return voices * Math.max(0, cycles);
+}
+
+// superdough drops a hap whose time is already past with this console.warn and never starts it
+// (packages/superdough/superdough.mjs, "cannot schedule sounds in the past").
+export const PAST_SCHEDULE_RE = /cannot schedule sounds in the past/i;
+
+export function countPastScheduleWarnings(warnings) {
+  return warnings.filter((w) => PAST_SCHEDULE_RE.test(String(w))).length;
+}
+
+// Longest run of consecutive samples with |x| < threshold in [from, to).
+export function longestSilentRun(samples, threshold, from = 0, to = samples.length) {
+  let longest = 0;
+  let run = 0;
+  for (let i = Math.max(0, from); i < Math.min(to, samples.length); i++) {
+    if (Math.abs(samples[i]) < threshold) {
+      run++;
+      if (run > longest) longest = run;
+    } else {
+      run = 0;
+    }
+  }
+  return longest;
+}
+
+// LIVE-1: the audio-level gap a failed evaluation causes, in excess of the pattern's own silence.
+// ownGapFrames is the longest near-silent run between the first note and the failure; the
+// longest run from the first note to the end of the recording, minus that, is the excess.
+// Without a note before the failure there is no baseline, so the excess is Infinity.
+export function liveGap(samples, { failureIndex, threshold = 1e-4 }) {
+  const firstNote = firstIndexAbove(samples, threshold, 0, failureIndex);
+  if (firstNote < 0) return { firstNote, ownGapFrames: null, longestGapFrames: null, excessFrames: Infinity };
+  const ownGapFrames = longestSilentRun(samples, threshold, firstNote, failureIndex);
+  const longestGapFrames = longestSilentRun(samples, threshold, firstNote);
+  return { firstNote, ownGapFrames, longestGapFrames, excessFrames: Math.max(0, longestGapFrames - ownGapFrames) };
 }

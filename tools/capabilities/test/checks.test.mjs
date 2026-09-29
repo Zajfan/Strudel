@@ -1,5 +1,21 @@
 import { describe, expect, it } from 'vitest';
-import { analyzeSteps, checkArrangement, checkTuning, duckDrop, duckDropAt, locateError, rampWithinNote, stemResidual } from '../lib/checks.mjs';
+import {
+  analyzeSteps,
+  checkArrangement,
+  checkTuning,
+  countPastScheduleWarnings,
+  duckDrop,
+  duckDropAt,
+  expectedMinStarts,
+  isStemApiName,
+  judgeArrangement,
+  judgeStems,
+  liveGap,
+  locateError,
+  RAMP_DETECTION_DB,
+  rampWithinNote,
+  stemResidual,
+} from '../lib/checks.mjs';
 
 const hap = (begin, note) => ({ whole: { begin }, value: { note } });
 
@@ -31,9 +47,16 @@ describe('locateError', () => {
   it('falls back to a (line:column) message suffix', () => {
     expect(locateError({ message: 'Unexpected token (2:5)' }, 3)).toEqual({ line: 2, column: 5, source: 'message' });
   });
-  it('falls back to the first anonymous stack frame inside the user code', () => {
+  it('falls back to the first anonymous stack frame inside the user code, converted to 0-based', () => {
     const stack = 'TypeError: x\n    at eval (eval at f (file.mjs:1:1), <anonymous>:3:78)';
-    expect(locateError({ message: 'x', stack }, 3)).toEqual({ line: 3, column: 78, source: 'stack' });
+    expect(locateError({ message: 'x', stack }, 3)).toEqual({ line: 3, column: 77, source: 'stack' });
+  });
+  it('reports stack columns in the same 0-based convention as acorn loc', () => {
+    // V8 stack columns are 1-based: `  .notAFunction(2)` throws at 1-based column 4, which is
+    // acorn's 0-based column 3 (the `n` after the dot), the value ERROR_CASES expects.
+    const stack = 'TypeError: x.notAFunction is not a function\n    at eval (<anonymous>:3:4)';
+    expect(locateError({ message: 'x', stack }, 3)).toEqual({ line: 3, column: 3, source: 'stack' });
+    expect(locateError({ loc: { line: 3, column: 3 } }, 3).column).toBe(3);
   });
   it('returns null when nothing locates the error', () => {
     expect(locateError({ message: 'x', stack: 'at <anonymous>:9:1' }, 3)).toBeNull();
@@ -91,5 +114,115 @@ describe('stemResidual', () => {
   });
   it('reports the worst sample difference in dBFS', () => {
     expect(stemResidual(Float32Array.from([0.1]), [Float32Array.from([0])]).residualDbfs).toBeCloseTo(-20, 6);
+  });
+});
+
+describe('RAMP_DETECTION_DB', () => {
+  it('is pinned at 3 dB', () => {
+    expect(RAMP_DETECTION_DB).toBe(3);
+  });
+});
+
+describe('isStemApiName', () => {
+  it.each(['stems', 'stem', 'renderStems', 'exportStem', 'STEM_EXPORT', 'stem_export', 'stemExport'])('matches %s', (name) => {
+    expect(isStemApiName(name)).toBe(true);
+  });
+  it.each(['system', 'systemTime', 'ecosystem', 'stemmer', 'mastem', 'items'])('does not match %s', (name) => {
+    expect(isStemApiName(name)).toBe(false);
+  });
+});
+
+describe('judgeStems', () => {
+  const t = { maxResidualDbfs: -60 };
+  const base = { apis: ['x.renderStems'], exercised: true, residualDbfs: -100, eventCount: 10 };
+  it('fails with no events', () => {
+    expect(judgeStems({ ...base, eventCount: 0 }, t)).toMatchObject({ status: 'fail', error: 'no events rendered' });
+  });
+  it('fails without the threshold', () => {
+    expect(judgeStems(base, {})).toMatchObject({ status: 'fail', error: 'threshold maxResidualDbfs missing' });
+  });
+  it('fails when no stem API exists', () => {
+    expect(judgeStems({ ...base, apis: [] }, t)).toMatchObject({ status: 'fail', error: 'no stem export API' });
+  });
+  it('is not-run when an API is found but not exercised, however good the residual', () => {
+    expect(judgeStems({ ...base, exercised: false }, t)).toEqual({
+      status: 'not-run',
+      reason: 'stem-like API found but not exercised: x.renderStems',
+    });
+  });
+  it('fails an exercised API whose stems do not sum to the mix', () => {
+    expect(judgeStems({ ...base, residualDbfs: -20 }, t)).toMatchObject({ status: 'fail' });
+    expect(judgeStems({ ...base, residualDbfs: NaN }, t)).toMatchObject({ status: 'fail' });
+  });
+  it('passes only an exercised API within the residual', () => {
+    expect(judgeStems(base, t)).toEqual({ status: 'pass' });
+  });
+});
+
+describe('expectedMinStarts', () => {
+  it('allows one partial cycle at each end', () => {
+    // 60 s at 0.5 cps = 30 cycles; 29 full cycles guaranteed; 64 voices
+    expect(expectedMinStarts({ voices: 64, durationS: 60, cps: 0.5 })).toBe(64 * 29);
+    expect(expectedMinStarts({ voices: 2, durationS: 10.9, cps: 1 })).toBe(2 * 9);
+  });
+  it('never goes below zero, and is NaN for missing inputs (fails closed)', () => {
+    expect(expectedMinStarts({ voices: 4, durationS: 0.5, cps: 1 })).toBe(0);
+    expect(expectedMinStarts({ voices: 4, durationS: 10, cps: undefined })).toBeNaN();
+  });
+});
+
+describe('countPastScheduleWarnings', () => {
+  it("counts superdough's dropped-hap warnings only", () => {
+    const warnings = [
+      '[superdough]: cannot schedule sounds in the past (target: 1.20, now: 1.25)',
+      'something else',
+      '[superdough]: Cannot schedule sounds in the past (target: 3.00, now: 3.01)',
+    ];
+    expect(countPastScheduleWarnings(warnings)).toBe(2);
+    expect(countPastScheduleWarnings([])).toBe(0);
+  });
+});
+
+describe('liveGap', () => {
+  // Notes are 100-sample bursts every 150 samples (a 50-sample own gap), starting at sample 20.
+  const signal = (length, stopAt = Infinity) =>
+    Float32Array.from({ length }, (_, i) => (i >= 20 && i < stopAt && (i - 20) % 150 < 100 ? 0.5 : 0));
+  it('finds the pattern own gap before the failure and no excess when playback continues', () => {
+    const r = liveGap(signal(1520), { failureIndex: 760 });
+    expect(r).toMatchObject({ firstNote: 20, ownGapFrames: 50, longestGapFrames: 50, excessFrames: 0 });
+  });
+  it('reports the excess when playback stops after the failure', () => {
+    const r = liveGap(signal(1520, 920), { failureIndex: 760 });
+    expect(r.ownGapFrames).toBe(50);
+    // the last burst before sample 920 ends at 870 (770 + 100)
+    expect(r.longestGapFrames).toBe(1520 - 870);
+    expect(r.excessFrames).toBe(1520 - 870 - 50);
+  });
+  it('is Infinity (fails closed) when there is no note before the failure', () => {
+    expect(liveGap(new Float32Array(1000), { failureIndex: 500 }).excessFrames).toBe(Infinity);
+  });
+});
+
+describe('judgeArrangement', () => {
+  const shape = { sections: 8, bars: 8 };
+  const loops = { name: 'arrange()', eventsInSong: 64, wrongSection: 0, eventsAfterEnd: 8 };
+  const cut = { name: 'arrange() + filterWhen(t < 64)', eventsInSong: 64, wrongSection: 0, eventsAfterEnd: 0 };
+  it('passes when any candidate ends correctly, names it, and records that bare arrange() loops', () => {
+    const r = judgeArrangement([loops, cut], shape);
+    expect(r.status).toBe('pass');
+    expect(r.metrics.headline).toContain('arrange() + filterWhen(t < 64)');
+    expect(r.metrics.candidates).toEqual([loops, cut]);
+    expect(r.notes.construct).toBe('arrange() + filterWhen(t < 64)');
+    expect(r.notes.ergonomics).toMatch(/bare arrange\(\) loops/);
+  });
+  it('fails when every candidate loops, has wrong sections, or is empty', () => {
+    const wrong = { ...cut, name: 'b', wrongSection: 3 };
+    const empty = { ...cut, name: 'c', eventsInSong: 0 };
+    const r = judgeArrangement([loops, wrong, empty], shape);
+    expect(r.status).toBe('fail');
+    expect(r.notes.error).toContain('arrange()');
+  });
+  it('fails with no candidates', () => {
+    expect(judgeArrangement([], shape).status).toBe('fail');
   });
 });
