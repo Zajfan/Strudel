@@ -23,7 +23,11 @@ export async function probe({ thresholds, log }) {
   };
   const fail = (error, headline) => ({ status: 'fail', metrics: { ...metrics, headline }, notes: { error } });
   if (a.eventCount === 0) return fail('no events rendered', 'no events');
-  if (level < thresholds.minRms) return fail(`rms ${level} below ${thresholds.minRms}`, 'silent');
+  if (!(level >= thresholds.minRms)) {
+    const reason =
+      thresholds.minRms == null ? 'threshold minRms missing' : `rms ${level} below ${thresholds.minRms}`;
+    return fail(reason, 'silent');
+  }
   if (a.left.length !== expectedLength) return fail(`length ${a.left.length} != ${expectedLength}`, 'wrong length');
   if (diffLeft !== -1 || diffRight !== -1) {
     const first = diffLeft === -1 ? diffRight : diffRight === -1 ? diffLeft : Math.min(diffLeft, diffRight);

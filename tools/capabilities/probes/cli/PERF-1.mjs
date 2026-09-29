@@ -17,8 +17,12 @@ export async function probe({ thresholds }) {
   if (out.eventCount === 0 || rms(out.left) === 0) {
     return { status: 'fail', metrics, notes: { error: 'no events or silent render; speed is meaningless' } };
   }
-  if (factor < thresholds.minRealtimeFactor) {
-    return { status: 'fail', metrics, notes: { error: `${factor.toFixed(2)}x < ${thresholds.minRealtimeFactor}x` } };
+  if (!(factor >= thresholds.minRealtimeFactor)) {
+    const error =
+      thresholds.minRealtimeFactor == null
+        ? 'threshold minRealtimeFactor missing'
+        : `${factor.toFixed(2)}x < ${thresholds.minRealtimeFactor}x`;
+    return { status: 'fail', metrics, notes: { error } };
   }
   return { status: 'pass', metrics, notes: {} };
 }
