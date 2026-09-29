@@ -15,6 +15,26 @@ node tools/capabilities/run.mjs --matrix-only          # regenerate MATRIX.md
 Each run merges into `results/<date>-<tier>.json` and regenerates `MATRIX.md`
 from the newest file per tier. Commit both: they are the evidence.
 
+`--only` rejects an id that isn't a cell of `--tier` (exit code 2, nothing written).
+
+## Merging and provenance
+
+Before writing, the runner carries forward results from the newest existing
+`results/*-<tier>.json` file for that tier (any date, not just today's), then
+overlays this run's new results on top. Any tier cell still without a result
+after that merge is recorded as `{status:'not-run', metrics:{}, notes:{reason:'no
+probe yet'}}` — this applies to `--ingest` too.
+
+Every newly produced result (from a probe run or an `--ingest`) gets a `run`
+field: `{ ranAt, commit, dirty, thresholds, source: 'probe'|'ingest', node,
+platform }`. `thresholds` is a snapshot of the cell's thresholds from
+`capabilities.json` at the time the result was produced. `dirty` is true when
+`git status --porcelain -- tools/capabilities packages src-tauri` is non-empty.
+Carried-forward results keep whatever `run` they already had (or none, for
+older files). `MATRIX.md` appends ` ⚠ stale` to a cell whose `run.thresholds`
+no longer matches the capability's current thresholds; results without `run`
+are never marked stale.
+
 ## Writing a probe
 
 Create `probes/<tier>/<ID>.mjs`:
