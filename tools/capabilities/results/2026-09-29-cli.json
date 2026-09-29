@@ -1,0 +1,100 @@
+{
+  "tier": "cli",
+  "date": "2026-09-29",
+  "node": "v22.21.1",
+  "platform": "linux-x64",
+  "results": {
+    "ARR-1": {
+      "status": "not-run",
+      "metrics": {},
+      "notes": {
+        "reason": "no probe yet"
+      }
+    },
+    "MIX-1": {
+      "status": "not-run",
+      "metrics": {},
+      "notes": {
+        "reason": "no probe yet"
+      }
+    },
+    "AUT-1": {
+      "status": "not-run",
+      "metrics": {},
+      "notes": {
+        "reason": "no probe yet"
+      }
+    },
+    "EXP-1": {
+      "status": "fail",
+      "metrics": {
+        "events": 1115,
+        "rms": 0.09030958670680647,
+        "lengthSamples": 3120000,
+        "expectedLength": 3120000,
+        "firstDifferenceLeft": 1,
+        "firstDifferenceRight": 1,
+        "headline": "non-deterministic"
+      },
+      "notes": {
+        "error": "renders differ from sample 1 (0.000 s). Suspect: Math.random() in supradough noise/supersaw oscillators"
+      }
+    },
+    "EXP-2": {
+      "status": "not-run",
+      "metrics": {},
+      "notes": {
+        "reason": "no probe yet"
+      }
+    },
+    "PERF-1": {
+      "status": "pass",
+      "metrics": {
+        "events": 1115,
+        "audioSeconds": 65,
+        "renderSeconds": 14.533660634,
+        "realtimeFactor": 4.4723763432276105,
+        "headline": "4.5x real time"
+      },
+      "notes": {}
+    },
+    "PLUG-1": {
+      "status": "not-run",
+      "metrics": {},
+      "notes": {
+        "reason": "no probe yet"
+      }
+    },
+    "SYNC-1": {
+      "status": "not-run",
+      "metrics": {},
+      "notes": {
+        "reason": "no probe yet"
+      }
+    },
+    "TUNE-1": {
+      "status": "not-run",
+      "metrics": {},
+      "notes": {
+        "reason": "no probe yet"
+      }
+    },
+    "LANG-1": {
+      "status": "not-run",
+      "metrics": {},
+      "notes": {
+        "reason": "no probe yet"
+      }
+    },
+    "BUILD-0": {
+      "status": "pass",
+      "metrics": {
+        "node": "v22.21.1",
+        "events": 3,
+        "rms": 0.12695920809583505,
+        "headline": "node v22.21.1"
+      },
+      "notes": {}
+    }
+  }
+}
