@@ -29,5 +29,11 @@ export async function probe({ page, thresholds }) {
       notes: { ...notes, error: 'automation is sampled once per event; no continuous ramp within a held note' },
     };
   }
-  return { status: 'pass', metrics, notes };
+  // The stepped checks passed and a continuous ramp is present, but this probe only times the
+  // stepped onsets: the ramp's own timing error is not measured, so the cell cannot pass yet.
+  return {
+    status: 'not-run',
+    metrics: { ...metrics, headline: `${r.maxErrorMs.toFixed(3)} ms stepped; ramp untimed` },
+    notes: { ...notes, reason: 'partial: continuous ramp present; ramp timing not measured' },
+  };
 }
