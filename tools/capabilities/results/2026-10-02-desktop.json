@@ -468,25 +468,31 @@
         "pluginNotes": 4,
         "referenceNotes": 4,
         "syncOffsetsMs": [
-          -0.09,
-          -0.32,
-          0.7,
-          0.09
+          0.66,
+          -0.34,
+          0.02,
+          1.56
         ],
-        "maxSyncOffsetMs": 0.7029478458049886,
-        "pluginRms": 0.04055706812508957,
-        "masterRms": 0.05457834049383721,
-        "reverbTailGainDb": 93.99220139041904,
+        "maxSyncOffsetMs": 1.564625850340136,
+        "pluginRms": 0.04050603472940141,
+        "masterRms": 0.05338500984023352,
+        "reverbTailGainDb": 94.8359783270102,
         "automatableParams": 598,
-        "automationDropDb": 154.22520276590004,
+        "gui": {
+          "width": 1141,
+          "height": 711,
+          "colours": 5071,
+          "closed": true
+        },
+        "automationDropDb": 154.30185924059236,
         "native": {
           "notes": 13,
           "lateNotes": 0,
           "device": "strudel_null",
-          "rms": 0.10064572089570638,
+          "rms": 0.1006457113358683,
           "loadedAfterUnload": []
         },
-        "headline": "Surge XT in the mixer: within 0.7 ms of the beat, room +94.0 dB, automation -154 dB; native: 13 notes"
+        "headline": "Surge XT in the mixer: within 1.6 ms of the beat, room +94.8 dB, automation -154 dB, GUI 1141x711; native: 13 notes"
       },
       "notes": {
         "plugin": "Surge XT",
@@ -494,8 +500,8 @@
         "native": "setcps(1)\nnote(\"c4 e4 g4 c5\").clap('Surge XT', { output: 'native' })"
       },
       "run": {
-        "ranAt": "2026-10-02T20:42:29.728Z",
-        "commit": "97c47b92",
+        "ranAt": "2026-10-02T20:50:15.086Z",
+        "commit": "2d3fccd8",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",

@@ -57,7 +57,8 @@ fn main() {
         audio::mix_notes,
         audio::mix_render,
         audio::mix_param_list,
-        audio::mix_params
+        audio::mix_params,
+        audio::clap_gui
       ]
     )
     .setup(|app| {

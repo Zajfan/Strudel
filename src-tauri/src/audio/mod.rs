@@ -3,6 +3,7 @@
 pub mod cue;
 pub mod mixer;
 pub mod plugins;
+pub mod x11window;
 
 use tauri::ipc::{ InvokeBody, Request, Response };
 use tauri::State;
@@ -129,4 +130,14 @@ pub fn mix_param_list(plugin: usize, mixer: State<'_, MixerEngine>) -> Result<Ve
 #[tauri::command]
 pub fn mix_params(plugin: usize, params: Vec<MixParam>, mixer: State<'_, MixerEngine>) -> Result<(), String> {
   mixer.params(plugin, params)
+}
+
+// Shows or hides a plugin's own GUI (in its own window); the plugin must be loaded (played once).
+#[tauri::command]
+pub fn clap_gui(plugin: String, show: bool, engine: State<'_, PluginEngine>, mixer: State<'_, MixerEngine>) -> Result<(), String> {
+  if mixer.gui(&plugin, show)? || engine.gui(&plugin, show)? {
+    Ok(())
+  } else {
+    Err(format!("\"{}\" is not loaded: play a note on it first", plugin))
+  }
 }

@@ -8,12 +8,11 @@
 use std::collections::HashMap;
 use std::sync::mpsc::{ channel, Receiver, Sender };
 use std::sync::Mutex;
-use std::thread::JoinHandle;
 use std::time::{ Duration, Instant };
 
 use serde::Deserialize;
 
-use super::plugins::{ load_plugin, NewSlot, NoteEvent, ParamDesc, Slot, BLOCK, CHANNELS };
+use super::plugins::{ host_gui, load_plugin, wait_unloaded, Loaded, NewSlot, NoteEvent, ParamDesc, Slot, BLOCK, CHANNELS };
 
 #[derive(Deserialize)]
 pub struct MixNote {
@@ -61,7 +60,9 @@ struct Inner {
   sample_rate: f64,
   plugins: HashMap<String, usize>,
   params: HashMap<usize, Vec<ParamDesc>>,
-  threads: HashMap<usize, JoinHandle<()>>,
+  // per plugin index: its signal for having unloaded, and its id on the main thread
+  unloaded: HashMap<usize, Receiver<()>>,
+  host_ids: HashMap<usize, u64>,
   next_index: usize,
 }
 
@@ -155,18 +156,27 @@ impl MixerEngine {
     let inner = guard.get_or_insert_with(|| {
       let (commands, receiver) = channel();
       std::thread::spawn(move || render_thread(receiver));
-      Inner { commands, sample_rate, plugins: HashMap::new(), params: HashMap::new(), threads: HashMap::new(), next_index: 0 }
+      Inner {
+        commands,
+        sample_rate,
+        plugins: HashMap::new(),
+        params: HashMap::new(),
+        unloaded: HashMap::new(),
+        host_ids: HashMap::new(),
+        next_index: 0,
+      }
     });
     if let Some(&index) = inner.plugins.get(plugin) {
       return Ok(index);
     }
     let index = inner.next_index;
     inner.next_index += 1;
-    let (slot, thread) = load_plugin(plugin, index, sample_rate)?;
+    let Loaded { slot, unloaded, id } = load_plugin(plugin, index, sample_rate)?;
+    inner.host_ids.insert(index, id);
+    inner.unloaded.insert(index, unloaded);
     inner.params.insert(index, slot.layout.params.clone());
     inner.commands.send(Command::Add(slot)).map_err(|e| e.to_string())?;
     inner.plugins.insert(plugin.to_string(), index);
-    inner.threads.insert(index, thread);
     Ok(index)
   }
 
@@ -182,6 +192,22 @@ impl MixerEngine {
       frames.push(FrameNote { frame: off.max(on + 1), key: note.key, velocity: 0.0, on: false });
     }
     inner.commands.send(Command::Notes(plugin, frames)).map_err(|e| e.to_string())
+  }
+
+  // Shows or hides a loaded plugin's GUI; Ok(false) if it isn't loaded here.
+  pub fn gui(&self, plugin: &str, show: bool) -> Result<bool, String> {
+    let id = {
+      let guard = self.inner.lock().unwrap();
+      let Some(inner) = guard.as_ref() else {
+        return Ok(false);
+      };
+      let Some(index) = inner.plugins.get(plugin) else {
+        return Ok(false);
+      };
+      *inner.host_ids.get(index).ok_or("no id for this plugin")?
+    };
+    host_gui(id, &format!("{} - Strudel", plugin), show)?;
+    Ok(true)
   }
 
   // the parameters a pattern can automate on a loaded plugin
@@ -225,7 +251,7 @@ impl MixerEngine {
 
   // Unloads a plugin; Ok(false) if it wasn't loaded here.
   pub fn unload(&self, plugin: &str) -> Result<bool, String> {
-    let thread = {
+    let unloaded = {
       let mut guard = self.inner.lock().unwrap();
       let Some(inner) = guard.as_mut() else {
         return Ok(false);
@@ -234,13 +260,11 @@ impl MixerEngine {
         return Ok(false);
       };
       inner.commands.send(Command::Remove(index)).map_err(|e| e.to_string())?;
-      inner.threads.remove(&index)
+      inner.host_ids.remove(&index);
+      inner.unloaded.remove(&index)
     };
-    if let Some(thread) = thread {
-      let deadline = Instant::now() + Duration::from_secs(2);
-      while !thread.is_finished() && Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(5));
-      }
+    if let Some(unloaded) = unloaded {
+      wait_unloaded(&unloaded, plugin)?;
     }
     Ok(true)
   }

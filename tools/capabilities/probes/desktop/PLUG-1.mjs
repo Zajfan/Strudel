@@ -8,7 +8,11 @@
 //    plugin's channel must get much quieter across the note.
 // 3. On a native output (.clap(name, { output: 'native' })): the engine plays on the harness's
 //    silent device; checked through engine_capture and engine_stats, and unloading.
+// 4. The plugin's GUI: clapGui opens it in its own window (on the app's Xvfb display), which must
+//    show something (not one flat colour), and closes it again.
 // Without Surge XT in a CLAP folder this is not-run (see the follow-ups doc for installing it).
+
+import { execFileSync } from 'node:child_process';
 
 export const usesPage = true;
 
@@ -184,6 +188,29 @@ export async function probe({ page, thresholds }) {
     }
   }
 
+  // 4. the GUI (while the plugin is loaded in the mixer, from part 1)
+  const guiTitle = `${PLUGIN} - Strudel`;
+  const windows = () => execFileSync('xwininfo', ['-display', page.display, '-root', '-tree'], { encoding: 'utf8' });
+  const guiOpen = await page.evaluate(async (plugin) => {
+    try {
+      await clapGui(plugin);
+      await new Promise((r) => setTimeout(r, 3000));
+      return {};
+    } catch (err) {
+      return { error: String(err) };
+    }
+  }, PLUGIN);
+  const guiLine = guiOpen.error ? undefined : windows().split('\n').find((l) => l.includes(`"${guiTitle}"`));
+  const guiId = guiLine?.trim().split(' ')[0];
+  const [guiWidth, guiHeight] = (guiLine?.match(/(\d+)x(\d+)\+/) ?? []).slice(1).map(Number);
+  // distinct colours in the window: a drawn GUI has many, an empty window one
+  const guiColours = guiId
+    ? Number(execFileSync('convert', ['-', '-format', '%k', 'info:'], { input: execFileSync('import', ['-display', page.display, '-window', guiId, 'png:-']) }).toString())
+    : 0;
+  await page.evaluate((plugin) => clapGui(plugin, false), PLUGIN);
+  await new Promise((r) => setTimeout(r, 500));
+  const guiClosed = !windows().includes(`"${guiTitle}"`);
+
   // 3. on a native output
   const native = await page.evaluate(playNative, { code: NATIVE_CODE, seconds: 3, plugin: PLUGIN }, { timeoutMs: 120000 });
   const metrics = {
@@ -195,11 +222,12 @@ export async function probe({ page, thresholds }) {
     masterRms: rmsOf(master, 0, master.length),
     reverbTailGainDb: tailGainDb,
     automatableParams: paramNames.length,
+    gui: { error: guiOpen.error, width: guiWidth, height: guiHeight, colours: guiColours, closed: guiClosed },
     automationDropDb,
     native: native.error
       ? { error: native.error }
       : { notes: native.stats.notes, lateNotes: native.stats.lateNotes, device: native.stats.device, rms: native.rms, loadedAfterUnload: native.loadedAfterUnload },
-    headline: `${PLUGIN} in the mixer: within ${maxOffsetMs.toFixed(1)} ms of the beat, room +${tailGainDb.toFixed(1)} dB, automation -${automationDropDb.toFixed(0)} dB; native: ${native.stats?.notes ?? 0} notes`,
+    headline: `${PLUGIN} in the mixer: within ${maxOffsetMs.toFixed(1)} ms of the beat, room +${tailGainDb.toFixed(1)} dB, automation -${automationDropDb.toFixed(0)} dB, GUI ${guiWidth}x${guiHeight}; native: ${native.stats?.notes ?? 0} notes`,
   };
   const fail = (error) => ({ status: 'fail', metrics, notes: { ...notes, error } });
   if (!(pluginOnsets.length >= SECONDS - 1)) return fail(`${pluginOnsets.length} plugin notes recorded on its channel`);
@@ -211,6 +239,10 @@ export async function probe({ page, thresholds }) {
   if (auto.error) return fail(`automation: ${auto.error}`);
   if (!paramNames.includes('Global Volume')) return fail(`clapParams has no "Global Volume" (${paramNames.length} parameters)`);
   if (!(automationDropDb >= 12)) return fail(`automating Global Volume 1 -> 0 lowered the note by only ${automationDropDb.toFixed(1)} dB`);
+  if (guiOpen.error) return fail(`GUI: ${guiOpen.error}`);
+  if (!(guiWidth > 100 && guiHeight > 100)) return fail(`no "${guiTitle}" window of a usable size (${guiWidth}x${guiHeight})`);
+  if (!(guiColours > 50)) return fail(`the GUI window shows ${guiColours} colours: not drawn`);
+  if (!guiClosed) return fail('the GUI window was still open after clapGui(name, false)');
   if (native.error) return fail(`native output: ${native.error}`);
   if (!(native.stats.notes >= 11) || native.stats.lateNotes > 0) return fail(`native output: ${native.stats.notes} notes, ${native.stats.lateNotes} late`);
   if (!(native.rms >= thresholds.minRms)) return fail(`native output rms ${native.rms}`);

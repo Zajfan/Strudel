@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use std::ffi::CString;
 use std::path::PathBuf;
 use std::sync::atomic::{ AtomicBool, AtomicU64, Ordering };
-use std::sync::mpsc::{ channel, Sender };
+use std::sync::mpsc::{ channel, Receiver, Sender };
 use std::sync::{ Arc, Mutex, OnceLock };
 use std::time::{ Duration, Instant, SystemTime, UNIX_EPOCH };
 
@@ -22,6 +22,13 @@ use clack_extensions::audio_ports::{ AudioPortFlags, AudioPortInfoBuffer, Plugin
 use clack_extensions::log::{ HostLog, HostLogImpl, LogSeverity };
 use clack_extensions::note_ports::{ NoteDialect, NotePortInfoBuffer, PluginNotePorts };
 use clack_extensions::params::{ ParamInfoBuffer, ParamInfoFlags, PluginParams };
+use clack_extensions::gui::{ GuiApiType, GuiConfiguration, GuiSize, HostGui, HostGuiImpl, PluginGui, Window as ClapWindow };
+use clack_extensions::posix_fd::{ FdFlags, HostPosixFd, HostPosixFdImpl, PluginPosixFd };
+use clack_extensions::timer::{ HostTimer, HostTimerImpl, PluginTimer, TimerId };
+use std::cell::{ Cell, RefCell };
+use std::os::fd::RawFd;
+
+use super::x11window::X11Window;
 use clack_host::events::event_types::ParamValueEvent;
 use clack_host::events::event_types::{ MidiEvent, NoteOffEvent, NoteOnEvent };
 use clack_host::events::Match;
@@ -38,11 +45,17 @@ const CAPTURE_SECONDS: usize = 10;
 // ------------------------------------------------------------------ CLAP host side
 
 #[derive(Default)]
-struct Shared {
+pub(crate) struct Shared {
   callback_requested: AtomicBool,
   audio_ports: OnceLock<Option<PluginAudioPorts>>,
   note_ports: OnceLock<Option<PluginNotePorts>>,
   params: OnceLock<Option<PluginParams>>,
+  gui: OnceLock<Option<PluginGui>>,
+  timer: OnceLock<Option<PluginTimer>>,
+  posix_fd: OnceLock<Option<PluginPosixFd>>,
+  // GUI requests from the plugin, handled by its host thread
+  gui_closed: AtomicBool,
+  gui_resize: Mutex<Option<(u32, u32)>>,
 }
 
 impl<'a> SharedHandler<'a> for Shared {
@@ -50,6 +63,9 @@ impl<'a> SharedHandler<'a> for Shared {
     let _ = self.audio_ports.set(instance.get_extension());
     let _ = self.note_ports.set(instance.get_extension());
     let _ = self.params.set(instance.get_extension());
+    let _ = self.gui.set(instance.get_extension());
+    let _ = self.timer.set(instance.get_extension());
+    let _ = self.posix_fd.set(instance.get_extension());
   }
   fn request_restart(&self) {}
   fn request_process(&self) {}
@@ -64,17 +80,82 @@ impl HostLogImpl for Shared {
   }
 }
 
-struct Host;
+impl HostGuiImpl for Shared {
+  fn resize_hints_changed(&self) {}
+  fn request_resize(&self, size: GuiSize) -> Result<(), HostError> {
+    *self.gui_resize.lock().unwrap() = Some((size.width, size.height));
+    Ok(())
+  }
+  fn request_show(&self) -> Result<(), HostError> {
+    Ok(())
+  }
+  fn request_hide(&self) -> Result<(), HostError> {
+    Ok(())
+  }
+  fn closed(&self, _was_destroyed: bool) {
+    self.gui_closed.store(true, Ordering::SeqCst);
+  }
+}
+
+// The plugin's main thread state: timers and file descriptors it registered (plugins with a GUI on
+// Linux run their event loop through these), serviced by its host thread.
+#[derive(Default)]
+pub(crate) struct HostMain {
+  timers: RefCell<Vec<(u32, Duration, Instant)>>,
+  next_timer: Cell<u32>,
+  fds: RefCell<Vec<(RawFd, FdFlags)>>,
+}
+
+impl<'a> MainThreadHandler<'a> for HostMain {}
+
+impl HostTimerImpl for HostMain {
+  fn register_timer(&self, period_ms: u32) -> Result<TimerId, HostError> {
+    let id = self.next_timer.get();
+    self.next_timer.set(id + 1);
+    let period = Duration::from_millis(period_ms.max(1) as u64);
+    self.timers.borrow_mut().push((id, period, Instant::now() + period));
+    Ok(TimerId(id))
+  }
+  fn unregister_timer(&self, timer_id: TimerId) -> Result<(), HostError> {
+    self.timers.borrow_mut().retain(|(id, _, _)| *id != timer_id.0);
+    Ok(())
+  }
+}
+
+impl HostPosixFdImpl for HostMain {
+  fn register_fd(&self, fd: RawFd, flags: FdFlags) -> Result<(), HostError> {
+    self.fds.borrow_mut().push((fd, flags));
+    Ok(())
+  }
+  fn modify_fd(&self, fd: RawFd, flags: FdFlags) -> Result<(), HostError> {
+    for entry in self.fds.borrow_mut().iter_mut() {
+      if entry.0 == fd {
+        entry.1 = flags;
+      }
+    }
+    Ok(())
+  }
+  fn unregister_fd(&self, fd: RawFd) -> Result<(), HostError> {
+    self.fds.borrow_mut().retain(|(f, _)| *f != fd);
+    Ok(())
+  }
+}
+
+pub(crate) struct Host;
 
 impl HostHandlers for Host {
   type Shared<'a> = Shared;
-  type MainThread<'a> = ();
+  type MainThread<'a> = HostMain;
   type AudioProcessor<'a> = ();
 
   fn declare_extensions(builder: &mut HostExtensions<Self>, _shared: &Self::Shared<'_>) {
     builder.register::<HostLog>();
+    builder.register::<HostGui>();
+    builder.register::<HostTimer>();
+    builder.register::<HostPosixFd>();
   }
 }
+
 
 // A parameter a pattern can automate (automatable, not read-only or hidden), in plain values.
 #[derive(Clone, Serialize)]
@@ -220,56 +301,304 @@ enum AudioCommand {
   Remove(usize),
 }
 
-// Loads the plugin on a new host thread, which keeps servicing it; returns its activated processor.
-pub(crate) fn load_plugin(name: &str, index: usize, sample_rate: f64) -> Result<(NewSlot, std::thread::JoinHandle<()>), String> {
-  let path = find_plugin(name)?;
-  let (ready, loaded) = channel::<Result<NewSlot, String>>();
-  let (retire, retired) = channel::<StoppedPluginAudioProcessor<Host>>();
-  let thread = std::thread::spawn(move || {
-    let result = (|| -> Result<(PluginEntry, PluginInstance<Host>, NewSlot), String> {
-      let host_info = HostInfo::new("Strudel", "Strudel", "https://strudel.cc", "0.1.0").map_err(|e| e.to_string())?;
-      let path = std::fs::canonicalize(&path).map_err(|e| e.to_string())?;
-      // SAFETY: loading a plugin runs its native initialisation code, which is what hosting means
-      let entry = unsafe { PluginEntry::load(&*path.to_string_lossy()) }.map_err(|e| format!("cannot load {}: {}", path.display(), e))?;
-      let factory = entry.get_plugin_factory().ok_or("the bundle has no plugin factory")?;
-      let id: CString = factory
-        .plugin_descriptors()
-        .find(|d| d.features().any(|f| f.to_bytes() == b"instrument"))
-        .and_then(|d| d.id().map(|id| id.to_owned()))
-        .ok_or("the bundle has no instrument")?;
-      let mut instance = PluginInstance::<Host>::new(|_| Shared::default(), |_| (), &entry, &id, &host_info).map_err(|e| e.to_string())?;
-      let layout = layout(&mut instance)?;
-      let config = PluginAudioConfiguration { sample_rate, min_frames_count: 1, max_frames_count: BLOCK as u32 };
-      let processor = instance.activate(|_, _| (), config).map_err(|e| e.to_string())?;
-      Ok((entry, instance, NewSlot { index, processor, layout, retire }))
-    })();
-    match result {
-      Err(err) => {
-        let _ = ready.send(Err(err));
-      }
-      Ok((entry, mut instance, slot)) => {
-        let _ = ready.send(Ok(slot));
-        // the plugin's main thread, until the audio thread hands its processor back
-        loop {
-          if instance.access_shared_handler(|s| s.callback_requested.swap(false, Ordering::SeqCst)) {
-            instance.call_on_main_thread_callback();
-          }
-          match retired.recv_timeout(Duration::from_millis(5)) {
-            Ok(stopped) => {
-              instance.deactivate(stopped);
-              break;
-            }
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
-            // the processor was dropped with the audio stream: nothing left to deactivate
-            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
-          }
-        }
-        drop(instance);
-        drop(entry);
+// The plugin's GUI, while open: in a window of ours (embedded), or the plugin's own (floating).
+struct OpenGui {
+  window: Option<X11Window>,
+}
+
+fn open_gui(instance: &mut PluginInstance<Host>, title: &str) -> Result<OpenGui, String> {
+  let gui = instance.access_shared_handler(|s| s.gui.get().copied().flatten()).ok_or("this plugin has no GUI")?;
+  let handle = instance.plugin_handle();
+  let embedded = || GuiConfiguration { api_type: GuiApiType::X11, is_floating: false };
+  let floating = || GuiConfiguration { api_type: GuiApiType::X11, is_floating: true };
+  if gui.is_api_supported(&handle, embedded()) {
+    gui.create(&handle, embedded()).map_err(|e| format!("cannot create the GUI: {:?}", e))?;
+    let size = gui.get_size(&handle).unwrap_or(GuiSize { width: 800, height: 600 });
+    let window = X11Window::open(title, size.width, size.height)?;
+    // SAFETY: the window lives (in OpenGui) until the GUI is destroyed in close_gui
+    unsafe { gui.set_parent(&handle, ClapWindow::from_x11_handle(window.id() as std::ffi::c_ulong)) }.map_err(|e| format!("cannot embed the GUI: {:?}", e))?;
+    gui.show(&handle).map_err(|e| format!("cannot show the GUI: {:?}", e))?;
+    Ok(OpenGui { window: Some(window) })
+  } else if gui.is_api_supported(&handle, floating()) {
+    gui.create(&handle, floating()).map_err(|e| format!("cannot create the GUI: {:?}", e))?;
+    if let Ok(title) = CString::new(title) {
+      gui.suggest_title(&handle, &title);
+    }
+    gui.show(&handle).map_err(|e| format!("cannot show the GUI: {:?}", e))?;
+    Ok(OpenGui { window: None })
+  } else {
+    Err("this plugin has no X11 GUI".to_string())
+  }
+}
+
+fn close_gui(instance: &mut PluginInstance<Host>, open: OpenGui) {
+  if let Some(gui) = instance.access_shared_handler(|s| s.gui.get().copied().flatten()) {
+    let handle = instance.plugin_handle();
+    let _ = gui.hide(&handle);
+    gui.destroy(&handle);
+  }
+  drop(open.window);
+}
+
+// ------------------------------------------------------------------ the plugins' main thread
+// CLAP gives every plugin a main thread, and plugins built on JUCE (like Surge XT) keep process-wide
+// state that assumes it is the same thread for all of them. So one thread hosts every plugin of
+// the app: it loads and activates them, services their callbacks, timers, file descriptors and
+// GUIs, and deactivates and unloads them when the audio side hands their processors back.
+
+enum MainCommand {
+  Load { path: PathBuf, index: usize, sample_rate: f64, reply: Sender<Result<Loaded, String>> },
+  Gui { id: u64, title: String, show: bool, reply: Sender<Result<(), String>> },
+}
+
+// what an engine gets for a loaded plugin
+pub(crate) struct Loaded {
+  pub(crate) slot: NewSlot,
+  // signalled once the plugin is deactivated and unloaded
+  pub(crate) unloaded: Receiver<()>,
+  // the plugin on the main thread, for host_gui
+  pub(crate) id: u64,
+}
+
+struct Hosted {
+  id: u64,
+  instance: PluginInstance<Host>,
+  _entry: PluginEntry,
+  gui: Option<OpenGui>,
+  retired: Receiver<StoppedPluginAudioProcessor<Host>>,
+  unloaded: Sender<()>,
+}
+
+fn main_thread() -> Sender<MainCommand> {
+  static MAIN: OnceLock<Mutex<Sender<MainCommand>>> = OnceLock::new();
+  MAIN
+    .get_or_init(|| {
+      let (commands, received) = channel();
+      std::thread::Builder::new().name("strudel-plugins-main".to_string()).spawn(move || main_loop(received)).unwrap();
+      Mutex::new(commands)
+    })
+    .lock()
+    .unwrap()
+    .clone()
+}
+
+fn instantiate(path: &PathBuf, index: usize, sample_rate: f64, id: u64) -> Result<(Hosted, Loaded), String> {
+  let host_info = HostInfo::new("Strudel", "Strudel", "https://strudel.cc", "0.1.0").map_err(|e| e.to_string())?;
+  let path = std::fs::canonicalize(path).map_err(|e| e.to_string())?;
+  // SAFETY: loading a plugin runs its native initialisation code, which is what hosting means
+  let entry = unsafe { PluginEntry::load(&*path.to_string_lossy()) }.map_err(|e| format!("cannot load {}: {}", path.display(), e))?;
+  let factory = entry.get_plugin_factory().ok_or("the bundle has no plugin factory")?;
+  let plugin_id: CString = factory
+    .plugin_descriptors()
+    .find(|d| d.features().any(|f| f.to_bytes() == b"instrument"))
+    .and_then(|d| d.id().map(|id| id.to_owned()))
+    .ok_or("the bundle has no instrument")?;
+  let mut instance =
+    PluginInstance::<Host>::new(|_| Shared::default(), |_| HostMain::default(), &entry, &plugin_id, &host_info).map_err(|e| e.to_string())?;
+  let layout = layout(&mut instance)?;
+  let config = PluginAudioConfiguration { sample_rate, min_frames_count: 1, max_frames_count: BLOCK as u32 };
+  let processor = instance.activate(|_, _| (), config).map_err(|e| e.to_string())?;
+  let (retire, retired) = channel();
+  let (unloaded_tx, unloaded) = channel();
+  let hosted = Hosted { id, instance, _entry: entry, gui: None, retired, unloaded: unloaded_tx };
+  Ok((hosted, Loaded { slot: NewSlot { index, processor, layout, retire }, unloaded, id }))
+}
+
+fn main_loop(commands: Receiver<MainCommand>) {
+  let mut plugins: Vec<Hosted> = Vec::new();
+  let mut next_id = 0u64;
+  loop {
+    // with nothing hosted, just wait for work
+    if plugins.is_empty() {
+      match commands.recv() {
+        Ok(command) => handle(command, &mut plugins, &mut next_id),
+        Err(_) => return,
       }
     }
-  });
-  Ok((loaded.recv().map_err(|e| e.to_string())??, thread))
+    while let Ok(command) = commands.try_recv() {
+      handle(command, &mut plugins, &mut next_id);
+    }
+    // plugins whose processor came back (or was dropped with its stream): deactivate and unload
+    let mut i = 0;
+    while i < plugins.len() {
+      let stopped = match plugins[i].retired.try_recv() {
+        Ok(stopped) => Some(Some(stopped)),
+        Err(std::sync::mpsc::TryRecvError::Disconnected) => Some(None),
+        Err(std::sync::mpsc::TryRecvError::Empty) => None,
+      };
+      if let Some(stopped) = stopped {
+        let mut hosted = plugins.remove(i);
+        if let Some(open) = hosted.gui.take() {
+          close_gui(&mut hosted.instance, open);
+        }
+        if let Some(stopped) = stopped {
+          hosted.instance.deactivate(stopped);
+        }
+        let unloaded = hosted.unloaded.clone();
+        drop(hosted);
+        let _ = unloaded.send(());
+        continue;
+      }
+      i += 1;
+    }
+    for hosted in plugins.iter_mut() {
+      if hosted.instance.access_shared_handler(|s| s.callback_requested.swap(false, Ordering::SeqCst)) {
+        hosted.instance.call_on_main_thread_callback();
+      }
+    }
+    service(&mut plugins, Duration::from_millis(5));
+    for hosted in plugins.iter_mut() {
+      // the window was closed by the user, or the plugin closed its floating window
+      let user_closed = hosted.gui.as_ref().and_then(|g| g.window.as_ref()).map_or(false, |w| w.closed());
+      let plugin_closed = hosted.instance.access_shared_handler(|s| s.gui_closed.swap(false, Ordering::SeqCst));
+      if user_closed || plugin_closed {
+        if let Some(open) = hosted.gui.take() {
+          close_gui(&mut hosted.instance, open);
+        }
+      }
+      if let Some((width, height)) = hosted.instance.access_shared_handler(|s| s.gui_resize.lock().unwrap().take()) {
+        if let Some(window) = hosted.gui.as_ref().and_then(|g| g.window.as_ref()) {
+          window.resize(width, height);
+          if let Some(ext) = hosted.instance.access_shared_handler(|s| s.gui.get().copied().flatten()) {
+            let _ = ext.set_size(&hosted.instance.plugin_handle(), GuiSize { width, height });
+          }
+        }
+      }
+    }
+  }
+}
+
+fn handle(command: MainCommand, plugins: &mut Vec<Hosted>, next_id: &mut u64) {
+  match command {
+    MainCommand::Load { path, index, sample_rate, reply } => {
+      let id = *next_id;
+      *next_id += 1;
+      let _ = reply.send(instantiate(&path, index, sample_rate, id).map(|(hosted, loaded)| {
+        plugins.push(hosted);
+        loaded
+      }));
+    }
+    MainCommand::Gui { id, title, show, reply } => {
+      let result = match plugins.iter_mut().find(|p| p.id == id) {
+        None => Err("the plugin is not loaded".to_string()),
+        Some(hosted) if show => {
+          if hosted.gui.is_some() {
+            Ok(())
+          } else {
+            open_gui(&mut hosted.instance, &title).map(|open| hosted.gui = Some(open))
+          }
+        }
+        Some(hosted) => {
+          if let Some(open) = hosted.gui.take() {
+            close_gui(&mut hosted.instance, open);
+          }
+          Ok(())
+        }
+      };
+      let _ = reply.send(result);
+    }
+  }
+}
+
+// One turn for all plugins: waits (at most `max_wait`, less if a timer is due) for their file
+// descriptors and GUI windows, then calls their fd and timer callbacks.
+fn service(plugins: &mut [Hosted], max_wait: Duration) {
+  let now = Instant::now();
+  let next_timer = plugins
+    .iter()
+    .filter_map(|p| p.instance.access_handler(|h| h.timers.borrow().iter().map(|(_, _, due)| *due).min()))
+    .min();
+  let wait = next_timer.map_or(max_wait, |due| due.saturating_duration_since(now).min(max_wait));
+  // (plugin, fd) for each polled descriptor; windows are polled too, with fd None
+  let mut owners: Vec<(usize, Option<RawFd>)> = Vec::new();
+  let mut polled: Vec<libc::pollfd> = Vec::new();
+  for (p, hosted) in plugins.iter().enumerate() {
+    for (fd, flags) in hosted.instance.access_handler(|h| h.fds.borrow().clone()) {
+      let mut events = 0;
+      if flags.contains(FdFlags::READ) {
+        events |= libc::POLLIN;
+      }
+      if flags.contains(FdFlags::WRITE) {
+        events |= libc::POLLOUT;
+      }
+      owners.push((p, Some(fd)));
+      polled.push(libc::pollfd { fd, events, revents: 0 });
+    }
+    if let Some(window) = hosted.gui.as_ref().and_then(|g| g.window.as_ref()) {
+      owners.push((p, None));
+      polled.push(libc::pollfd { fd: window.fd(), events: libc::POLLIN, revents: 0 });
+    }
+  }
+  if polled.is_empty() {
+    std::thread::sleep(wait);
+  } else {
+    // SAFETY: polled is a valid array of pollfd for the duration of the call
+    unsafe { libc::poll(polled.as_mut_ptr(), polled.len() as libc::nfds_t, wait.as_millis() as libc::c_int) };
+  }
+  for (k, (p, fd)) in owners.iter().enumerate() {
+    let (Some(fd), revents) = (fd, polled[k].revents) else {
+      continue;
+    };
+    if revents == 0 {
+      continue;
+    }
+    let mut flags = FdFlags::empty();
+    if revents & libc::POLLIN != 0 {
+      flags |= FdFlags::READ;
+    }
+    if revents & libc::POLLOUT != 0 {
+      flags |= FdFlags::WRITE;
+    }
+    if revents & (libc::POLLERR | libc::POLLHUP) != 0 {
+      flags |= FdFlags::ERROR;
+    }
+    let hosted = &mut plugins[*p];
+    if let Some(posix_fd) = hosted.instance.access_shared_handler(|s| s.posix_fd.get().copied().flatten()) {
+      posix_fd.on_fd(&hosted.instance.plugin_handle(), *fd, flags);
+    }
+  }
+  let now = Instant::now();
+  for hosted in plugins.iter_mut() {
+    let Some(timer) = hosted.instance.access_shared_handler(|s| s.timer.get().copied().flatten()) else {
+      continue;
+    };
+    let due: Vec<u32> = hosted.instance.access_handler(|h| {
+      let mut due = Vec::new();
+      for (id, period, next) in h.timers.borrow_mut().iter_mut() {
+        if *next <= now {
+          due.push(*id);
+          *next = now + *period;
+        }
+      }
+      due
+    });
+    for id in due {
+      timer.on_timer(&hosted.instance.plugin_handle(), TimerId(id));
+    }
+  }
+}
+
+// Loads a plugin on the plugins' main thread; returns its activated processor (for an engine's
+// audio thread), a signal for when it is unloaded, and its id for host_gui.
+pub(crate) fn load_plugin(name: &str, index: usize, sample_rate: f64) -> Result<Loaded, String> {
+  let path = find_plugin(name)?;
+  let (reply, answer) = channel();
+  main_thread().send(MainCommand::Load { path, index, sample_rate, reply }).map_err(|e| e.to_string())?;
+  answer.recv().map_err(|e| e.to_string())?
+}
+
+// Shows or hides a loaded plugin's GUI, and waits for the answer.
+pub(crate) fn host_gui(id: u64, title: &str, show: bool) -> Result<(), String> {
+  let (reply, answer) = channel();
+  main_thread()
+    .send(MainCommand::Gui { id, title: title.to_string(), show, reply })
+    .map_err(|e| e.to_string())?;
+  answer.recv_timeout(Duration::from_secs(10)).map_err(|e| e.to_string())?
+}
+
+// Waits (up to 2 s) until an unloaded plugin is gone.
+pub(crate) fn wait_unloaded(unloaded: &Receiver<()>, name: &str) -> Result<(), String> {
+  unloaded.recv_timeout(Duration::from_secs(2)).map_err(|_| format!("\"{}\" did not unload in time", name))
 }
 
 // ------------------------------------------------------------------ audio side
@@ -425,7 +754,9 @@ struct Running {
   sample_rate: u32,
   device: String,
   commands: Producer<AudioCommand>,
-  threads: HashMap<usize, std::thread::JoinHandle<()>>,
+  // per plugin index: its signal for having unloaded, and its id on the main thread
+  unloaded: HashMap<usize, Receiver<()>>,
+  host_ids: HashMap<usize, u64>,
   events: Producer<NoteEvent>,
   stop: Sender<()>,
   stats: Arc<Stats>,
@@ -584,7 +915,8 @@ impl PluginEngine {
       sample_rate,
       device,
       commands: commands_tx,
-      threads: HashMap::new(),
+      unloaded: HashMap::new(),
+      host_ids: HashMap::new(),
       events: events_tx,
       stop,
       stats,
@@ -618,25 +950,36 @@ impl PluginEngine {
     plugins.into_iter().map(|(n, _)| n.clone()).collect()
   }
 
-  // Removes a plugin from the stream and waits (up to 2 s) until its host thread has deactivated it.
+  // Removes a plugin from the stream and waits (up to 2 s) until the main thread has unloaded it.
   pub fn unload(&self, plugin: &str) -> Result<(), String> {
-    let thread = {
+    let unloaded = {
       let mut guard = self.running.lock().unwrap();
       let running = guard.as_mut().ok_or("the plugin engine is not running")?;
       let index = running.plugins.remove(plugin).ok_or_else(|| format!("\"{}\" is not loaded", plugin))?;
       running.commands.push(AudioCommand::Remove(index)).map_err(|_| "the audio thread is busy".to_string())?;
-      running.threads.remove(&index)
+      running.host_ids.remove(&index);
+      running.unloaded.remove(&index)
     };
-    if let Some(thread) = thread {
-      let deadline = Instant::now() + Duration::from_secs(2);
-      while !thread.is_finished() && Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(5));
-      }
-      if !thread.is_finished() {
-        return Err(format!("\"{}\" did not unload in time", plugin));
-      }
+    if let Some(unloaded) = unloaded {
+      wait_unloaded(&unloaded, plugin)?;
     }
     Ok(())
+  }
+
+  // Shows or hides a loaded plugin's GUI; Ok(false) if it isn't loaded here.
+  pub fn gui(&self, plugin: &str, show: bool) -> Result<bool, String> {
+    let id = {
+      let guard = self.running.lock().unwrap();
+      let Some(running) = guard.as_ref() else {
+        return Ok(false);
+      };
+      let Some(index) = running.plugins.get(plugin) else {
+        return Ok(false);
+      };
+      *running.host_ids.get(index).ok_or("no id for this plugin")?
+    };
+    host_gui(id, &format!("{} - Strudel", plugin), show)?;
+    Ok(true)
   }
 
   // Moves the engine to another output device, reloading the plugins that were loaded.
@@ -662,10 +1005,11 @@ impl PluginEngine {
     }
     let index = running.next_index;
     running.next_index += 1;
-    let (slot, thread) = load_plugin(plugin, index, running.sample_rate as f64)?;
+    let Loaded { slot, unloaded, id } = load_plugin(plugin, index, running.sample_rate as f64)?;
+    running.host_ids.insert(index, id);
+    running.unloaded.insert(index, unloaded);
     running.commands.push(AudioCommand::Add(slot)).map_err(|_| "the audio thread is busy".to_string())?;
     running.plugins.insert(plugin.to_string(), index);
-    running.threads.insert(index, thread);
     Ok(index)
   }
 

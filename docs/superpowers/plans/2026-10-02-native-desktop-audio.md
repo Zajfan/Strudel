@@ -60,4 +60,12 @@ WebKitGTK (the desktop webview) cannot play to a second output device (no `setSi
   whose control names a parameter is sent as timed plain values (`mix_params`) and applied as
   ParamValueEvents at their frames: `.clap('Surge XT').auto(sine.range(0, 1).slow(4), { c: 'Global Volume' })`.
   Not on the native output yet.
-- Next: plugin GUIs (floating windows; needs CLAP gui plus timer/posix-fd support on Linux).
+- Done 2026-10-02: plugin GUIs. `clapGui(name)` (or `.clap(name, { gui: true })`) opens the plugin's
+  own editor: embedded in an X11 window of ours (XWayland on Wayland desktops), or the plugin's
+  floating window if that's all it offers; `clapGui(name, false)` or the close button closes it.
+  The host implements CLAP's gui, timer-support and posix-fd-support, which plugins on Linux run
+  their GUI event loop through.
+- All plugins now share one main thread (`strudel-plugins-main`): JUCE-based plugins such as Surge XT
+  keep process-wide state that assumes a single main thread, and with a thread per plugin a second
+  instance could stall (seen as an intermittent unload timeout). The main thread loads, services
+  (callbacks, timers, file descriptors, windows, in one poll) and unloads every plugin.

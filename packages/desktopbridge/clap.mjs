@@ -165,10 +165,16 @@ function playNative(plugin, hap, currentTime, cps, targetTime) {
  * @param {string} plugin the plugin's file name without .clap, e.g. 'Surge XT'
  * @param {Object} [options]
  * @param {string} [options.output] 'mixer' (default) or 'native'
+ * @param {boolean} [options.gui] open the plugin's own window once it has loaded (see clapGui)
  */
-Pattern.prototype.clap = function (plugin, { output = 'mixer' } = {}) {
+Pattern.prototype.clap = function (plugin, { output = 'mixer', gui = false } = {}) {
   return this.onTrigger((hap, currentTime, cps, targetTime) => {
     hap.ensureObjectValue();
+    if (gui && !guiOpened.has(plugin)) {
+      guiOpened.add(plugin);
+      // once the first note has loaded it
+      setTimeout(() => clapGui(plugin).catch((err) => logger(`[clap] ${plugin} GUI: ${err}`, 'error')), 500);
+    }
     if (output === 'native') {
       playNative(plugin, hap, currentTime, cps, targetTime);
     } else {
@@ -176,6 +182,13 @@ Pattern.prototype.clap = function (plugin, { output = 'mixer' } = {}) {
     }
   });
 };
+
+// plugins whose window .clap(name, { gui: true }) has opened
+const guiOpened = new Set();
+
+// Shows (or with show = false, hides) a loaded plugin's own window. The window can also be closed
+// with its close button; clapGui(name) opens it again.
+export const clapGui = (plugin, show = true) => Invoke('clap_gui', { plugin, show });
 
 // The parameters of a plugin that patterns can automate: [{ id, name, module, min, max, default }].
 export const clapParams = async (plugin) => [...(await getStream(plugin).ready).params.values()];

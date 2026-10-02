@@ -167,7 +167,8 @@ export async function startDesktop({ application }) {
       await request('DELETE', session).catch(() => {});
     }
 
-    return { evaluate, click, send, close: closePage, errors: [], warnings: [], consoleErrors: [], engine: 'webkitgtk' };
+    // display: the Xvfb display the app runs on, for probes that look at its windows
+    return { evaluate, click, send, close: closePage, errors: [], warnings: [], consoleErrors: [], engine: 'webkitgtk', display };
   }
 
   return { openPage, close, display };
