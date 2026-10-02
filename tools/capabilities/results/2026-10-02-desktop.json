@@ -1,0 +1,130 @@
+{
+  "tier": "desktop",
+  "date": "2026-10-02",
+  "node": "v22.21.1",
+  "platform": "linux-x64",
+  "results": {
+    "ARR-1": {
+      "status": "not-run",
+      "metrics": {},
+      "notes": {
+        "reason": "no probe yet"
+      }
+    },
+    "MIX-1": {
+      "status": "not-run",
+      "metrics": {},
+      "notes": {
+        "reason": "no probe yet"
+      }
+    },
+    "AUT-1": {
+      "status": "not-run",
+      "metrics": {},
+      "notes": {
+        "reason": "no probe yet"
+      }
+    },
+    "EXP-1": {
+      "status": "not-run",
+      "metrics": {},
+      "notes": {
+        "reason": "no probe yet"
+      }
+    },
+    "EXP-2": {
+      "status": "not-run",
+      "metrics": {},
+      "notes": {
+        "reason": "no probe yet"
+      }
+    },
+    "PERF-1": {
+      "status": "not-run",
+      "metrics": {},
+      "notes": {
+        "reason": "no probe yet"
+      }
+    },
+    "LIVE-1": {
+      "status": "not-run",
+      "metrics": {},
+      "notes": {
+        "reason": "no probe yet"
+      }
+    },
+    "CUE-1": {
+      "status": "not-run",
+      "metrics": {},
+      "notes": {
+        "reason": "no probe yet"
+      }
+    },
+    "PLUG-1": {
+      "status": "not-run",
+      "metrics": {},
+      "notes": {
+        "reason": "Surge XT not installed (see follow-ups doc for the install command)",
+        "searched": [
+          "/usr/lib/clap/Surge XT.clap",
+          "/usr/lib64/clap/Surge XT.clap",
+          "~/.clap/Surge XT.clap"
+        ]
+      },
+      "run": {
+        "ranAt": "2026-09-29T12:17:21.852Z",
+        "commit": "96df6ef6",
+        "dirty": true,
+        "source": "probe",
+        "node": "v22.21.1",
+        "platform": "linux-x64",
+        "thresholds": {
+          "timeoutMs": 1200000,
+          "minRms": 0.001
+        }
+      }
+    },
+    "SYNC-1": {
+      "status": "not-run",
+      "metrics": {},
+      "notes": {
+        "reason": "no probe yet"
+      }
+    },
+    "TUNE-1": {
+      "status": "not-run",
+      "metrics": {},
+      "notes": {
+        "reason": "no probe yet"
+      }
+    },
+    "LANG-1": {
+      "status": "not-run",
+      "metrics": {},
+      "notes": {
+        "reason": "no probe yet"
+      }
+    },
+    "BUILD-0": {
+      "status": "pass",
+      "metrics": {
+        "exitCode": 0,
+        "seconds": 0,
+        "scope": "cargo check --locked (backend type-check only)",
+        "headline": "cargo check 0 s"
+      },
+      "notes": {},
+      "run": {
+        "ranAt": "2026-10-02T11:00:01.738Z",
+        "commit": "bd0f8ccd",
+        "dirty": true,
+        "source": "probe",
+        "node": "v22.21.1",
+        "platform": "linux-x64",
+        "thresholds": {
+          "timeoutMs": 1200000
+        }
+      }
+    }
+  }
+}
