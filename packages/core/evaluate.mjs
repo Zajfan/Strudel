@@ -59,12 +59,17 @@ const evalSourceURL = 'strudel-eval.js';
 
 // Line of the Function body's first line in its own stack frames: engines put a header
 // (`function anonymous(\n) {`) before the body, of a size that differs between engines.
-const evalBodyLine = (() => {
+// JavaScriptCore (Safari, WebKitGTK) ignores sourceURL in Function code, so its frames carry no
+// file name; it does give the throw position as err.line / err.column, with no err.sourceURL.
+const [evalBodyLine, evalBodyLineJSC] = (() => {
   try {
     Function(`throw new Error()\n//# sourceURL=${evalSourceURL}`)();
   } catch (err) {
-    return Number(stackPositions(err)[0]?.line ?? NaN);
+    const fromStack = Number(stackPositions(err)[0]?.line ?? NaN);
+    const fromJSC = !Number.isNaN(fromStack) || typeof err.line !== 'number' ? NaN : err.line;
+    return [fromStack, fromJSC];
   }
+  return [NaN, NaN];
 })();
 
 // [{ line, column }] of the evaluated code's frames in err.stack, innermost first (as the engine reports them)
@@ -92,12 +97,17 @@ function safeEval(str, options = {}) {
 
 // Positions in `code` (1-based line, 1-based column) of the evaluated code's frames in err.stack
 function evalErrorPositions(err) {
-  if (Number.isNaN(evalBodyLine)) {
-    return [];
+  if (!Number.isNaN(evalBodyLine)) {
+    return stackPositions(err)
+      .map(({ line, column }) => ({ line: line - evalBodyLine, column }))
+      .filter(({ line }) => line >= 1);
   }
-  return stackPositions(err)
-    .map(({ line, column }) => ({ line: line - evalBodyLine, column }))
-    .filter(({ line }) => line >= 1);
+  // JavaScriptCore: only the throw position, and only if it is in Function code (no sourceURL)
+  if (!Number.isNaN(evalBodyLineJSC) && err.sourceURL == null && typeof err.line === 'number' && typeof err.column === 'number') {
+    const line = err.line - evalBodyLineJSC;
+    return line >= 1 ? [{ line, column: err.column }] : [];
+  }
+  return [];
 }
 
 // Gives a runtime error the location in the user's code that caused it, like acorn does for syntax errors:

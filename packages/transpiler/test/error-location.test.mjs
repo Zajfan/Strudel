@@ -49,6 +49,15 @@ describe('runtime error locations', () => {
     expect(err.loc).toEqual({ line: 2, column: 13 });
   });
 
+  it("maps a position on a call's parenthesis to the callee, as JavaScriptCore reports failed calls", async () => {
+    const { transpiler } = await import('../index.mjs');
+    const { output, originalPosition } = transpiler('note("c")\n  .notAFunction(2)\n', {});
+    const generated = output.split('\n')[0];
+    // the "(" after notAFunction in the generated code
+    const column = generated.indexOf('notAFunction(') + 'notAFunction'.length;
+    expect(originalPosition(1, column)).toEqual({ line: 2, column: 3 });
+  });
+
   it('keeps acorn locations for syntax errors', async () => {
     const err = await errorOf('a\n  .b(800 +)\n');
     expect(err).toBeInstanceOf(SyntaxError);

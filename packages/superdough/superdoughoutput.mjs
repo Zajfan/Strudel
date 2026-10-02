@@ -157,7 +157,11 @@ export class SuperdoughOutput {
   initializeAudio() {
     const audioContext = this.audioContext;
     const maxChannelCount = audioContext.destination.maxChannelCount;
-    this.audioContext.destination.channelCount = maxChannelCount;
+    // some engines report 0 when they can't tell (WebKitGTK with some audio sinks), and a channel
+    // count of 0 throws: then keep the destination's own count
+    if (maxChannelCount > 0) {
+      this.audioContext.destination.channelCount = maxChannelCount;
+    }
     this.channelMerger = new ChannelMergerNode(audioContext, { numberOfInputs: audioContext.destination.channelCount });
     this.destinationGain = new GainNode(audioContext);
     this.channelMerger.connect(this.destinationGain);

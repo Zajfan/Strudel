@@ -180,6 +180,7 @@ export function transpiler(input, options = {}) {
 // to the nearest located code before them. `firstLineShift` is the length of a prefix added to line 1.
 function originalPositionLookup(ast, output, firstLineShift) {
   let consumer;
+  const outputLines = output.split('\n');
   return (line, column) => {
     if (consumer === undefined) {
       consumer = null;
@@ -195,7 +196,13 @@ function originalPositionLookup(ast, output, firstLineShift) {
     if (!consumer) {
       return null;
     }
-    const position = consumer.originalPositionFor({ line, column: line === 1 ? column - firstLineShift : column });
+    column = line === 1 ? column - firstLineShift : column;
+    // JavaScriptCore puts a failed call at its "(", which the source map assigns to the whole call
+    // expression (the start of a chain); the character before it ends the callee, e.g. the method name
+    if (column > 0 && outputLines[line - 1]?.[column] === '(') {
+      column -= 1;
+    }
+    const position = consumer.originalPositionFor({ line, column });
     return position.line == null ? null : { line: position.line, column: position.column };
   };
 }
