@@ -674,6 +674,9 @@ const note2freq = (note) => {
   return midi2freq(note);
 };
 
+// controls that DoughVoice runs through applyGainCurve; automation curves of these get the same
+const GAIN_CURVE_CONTROLS = new Set(['gain', 'velocity', 'postgain', 'shapevol', 'distortvol', 'delay']);
+
 export class DoughVoice {
   /** @type {number} */
   id = 0;
@@ -825,6 +828,8 @@ export class DoughVoice {
     // the rest.. we use $ for readability
     let $ = this;
     Object.assign($, value);
+    // automation curves (see `auto` in @strudel/core), applied in update
+    $._auto = value.auto ? [...value.auto.__ids].map((id) => value.auto[id]).filter((a) => a.curve?.length >= 2) : null;
     $.s = $.s ?? getDefaultValue('s');
     $.gain = applyGainCurve($.gain ?? getDefaultValue('gain'));
     $.velocity = applyGainCurve($.velocity ?? getDefaultValue('velocity'));
@@ -930,9 +935,23 @@ export class DoughVoice {
       $._distort?.push(new Distort());
     }
   }
+  // sets each automated control to its curve's value at time t (seconds): the curve spans the note,
+  // linearly interpolated, and holds its first and last values outside it
+  applyAutomation(t) {
+    const position = this._duration > 0 ? (t - this._begin) / this._duration : 1;
+    for (const { control, curve } of this._auto) {
+      const x = clamp(position, 0, 1) * (curve.length - 1);
+      const k = Math.min(Math.floor(x), curve.length - 2);
+      const value = curve[k] + (curve[k + 1] - curve[k]) * (x - k);
+      this[control] = GAIN_CURVE_CONTROLS.has(control) ? applyGainCurve(value) : value;
+    }
+  }
   update(t) {
     if (!this._sound && !this._buffers) {
       return 0;
+    }
+    if (this._auto) {
+      this.applyAutomation(t);
     }
     let gate = Number(t >= this._begin && t <= this._holdEnd);
 

@@ -24,7 +24,7 @@ import {
 } from './helpers.mjs';
 import { map } from 'nanostores';
 import { logger } from './logger.mjs';
-import { connectLFO, connectEnvelope, connectBusModulator } from './modulators.mjs';
+import { connectLFO, connectEnvelope, connectBusModulator, connectAutomation } from './modulators.mjs';
 import { getSampleBufferSource, loadBuffer } from './sampler.mjs';
 import { getAudioContext } from './audioContext.mjs';
 import { SuperdoughAudioController } from './superdoughoutput.mjs';
@@ -457,6 +457,19 @@ const compileKabel = (code) => {
   const node = kabel.evaluate(code);
   return node.compile({ log: false });
 };
+
+// controls whose value superdough transforms before it reaches the AudioParam; an automation curve
+// (see `auto`) gets the same transform
+const gainCurveControls = new Set(['gain', 'postgain', 'delay', 'busgain', 'shapevol', 'distortvol', 'velocity', 'tremolodepth']);
+function automationParamValue(control, value) {
+  if (gainCurveControls.has(control)) {
+    return applyGainCurve(value);
+  }
+  if (control === 'pan') {
+    return 2 * value - 1;
+  }
+  return value;
+}
 
 export const superdough = async (value, t, hapDuration, cps = 0.5, cycle = 0.5) => {
   // mapping from main FX and numbered FX chains to nodes
@@ -1036,6 +1049,24 @@ export const superdough = async (value, t, hapDuration, cps = 0.5, cycle = 0.5) 
           nodes,
         );
         env && chain.audioNodes.push(env);
+      }
+    }
+    if (fx.auto) {
+      for (const id of fx.auto.__ids) {
+        const { control, curve } = fx.auto[id];
+        const source = connectAutomation(
+          id,
+          {
+            control,
+            values: curve.map((x) => automationParamValue(control, x)),
+            begin: t,
+            duration: hapDuration,
+            end: endWithRelease,
+            fxi: key,
+          },
+          nodes,
+        );
+        source && chain.audioNodes.push(source);
       }
     }
     if (fx.bmod) {

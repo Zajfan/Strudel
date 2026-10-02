@@ -121,6 +121,25 @@ export const connectLFO = (id, params, nodeTracker) => {
   return lfoNode;
 };
 
+// Plays an automation curve (see `auto` in @strudel/core) on the control's AudioParams, on the audio
+// clock: `values` are already in the param's units and span [begin, begin + duration]. The curve is
+// added through a ConstantSourceNode as an offset from its first value (which the control itself is
+// set to), so automation already on the param, like a filter envelope, keeps working.
+export const connectAutomation = (id, params, nodeTracker) => {
+  const { control, subControl, values, begin, duration, end, fxi = 'main' } = params;
+  if (!(values?.length >= 2) || !(duration > 0)) return;
+  const { targetParams } = getTargetParamsForControl(control, nodeTracker[fxi], subControl);
+  if (!targetParams.length) return;
+  const ac = getAudioContext();
+  const source = new ConstantSourceNode(ac, { offset: 0 });
+  source.offset.setValueCurveAtTime(Float32Array.from(values, (v) => v - values[0]), begin, duration);
+  source.start(begin);
+  source.stop(Math.max(end, begin + duration));
+  nodeTracker.main[`auto_${id}`] = [source];
+  targetParams.forEach((t) => t && source.connect(t));
+  return source;
+};
+
 export const connectEnvelope = (id, params, nodeTracker) => {
   const { control, subControl, acurve, dcurve, rcurve, depth = 1, depthabs, fxi = 'main', ...filteredParams } = params;
   const { targetParams, paramName } = getTargetParamsForControl(control, nodeTracker[fxi], subControl);

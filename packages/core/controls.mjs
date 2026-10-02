@@ -6,6 +6,9 @@ This program is free software: you can redistribute it and/or modify it under th
 
 import { logger } from './logger.mjs';
 import { Pattern, pure, register, reify } from './pattern.mjs';
+import State from './state.mjs';
+import TimeSpan from './timespan.mjs';
+import Fraction from './fraction.mjs';
 
 export function createParam(names) {
   let isMulti = Array.isArray(names);
@@ -3263,6 +3266,93 @@ Pattern.prototype.env = function (config, id) {
   return this.modulate('env', config, id);
 };
 export const env = (config) => pure({}).env(config);
+
+// automation curves get this many points per cycle, unless `res` says otherwise
+const AUTO_POINTS_PER_CYCLE = 128;
+
+// value of `pat` at cycle t: a zero-width query, which signals answer with their value at t
+const valueAt = (pat, t) => pat.query(new State(new TimeSpan(t, t)))[0]?.value;
+const sampleAt = (pat, t) => {
+  const value = valueAt(pat, t);
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+};
+
+/**
+ * Automates a control during each note with a signal, the way automation lanes work in a DAW: the
+ * signal is followed continuously, on song time, also within a held note. As with `lfo` and `env`,
+ * the control set just before `auto` is automated, unless `control` names another one. The value
+ * set for the control itself is replaced by the signal's value at the start of the note.
+ *
+ * The signal is sampled `res` times per cycle (default 128) and played back as a smooth curve.
+ *
+ * @name auto
+ * @tags automation, superdough, supradough
+ * @param {Pattern} signal The values to follow, e.g. `saw.range(200, 4000).slow(8)`
+ * @param {Object} [config]
+ * @param {string} [config.control] Control to automate. Aliases: c
+ * @param {number} [config.res] Points per cycle. Aliases: resolution
+ * @param {string} [id] ID to use for this automation
+ * @returns Pattern
+ * @example
+ * note("c2").s("sawtooth").clip(1)
+ *   .lpf(500).auto(saw.range(200, 4000).slow(4))
+ * @example
+ * note("<c3 eb3>").s("triangle").clip(1)
+ *   .auto(sine.range(0.2, 1).fast(2), { c: "gain" })
+ */
+Pattern.prototype.auto = function (signal, config = {}, id) {
+  signal = reify(signal);
+  // config values may be patterns (in the REPL, "gain" is mini-notation): read them at each note
+  const explicit = config.control ?? config.c;
+  const controlPat = explicit === undefined ? undefined : reify(explicit);
+  const resPat = reify(config.res ?? config.resolution ?? AUTO_POINTS_PER_CYCLE);
+  return this.withHap((hap) => {
+    if (!hap.whole) {
+      return hap;
+    }
+    const v = typeof hap.value === 'object' ? { ...hap.value } : {};
+    const modulators = ['lfo', 'env', 'bmod', 'auto'];
+    const named = controlPat && valueAt(controlPat, hap.whole.begin);
+    const control = getControlName(named ?? Object.keys(v).filter((k) => !modulators.includes(k)).at(-1));
+    const pointsPerCycle = Number(valueAt(resPat, hap.whole.begin));
+    if (typeof control !== 'string' || !(pointsPerCycle > 0)) {
+      return hap;
+    }
+    const begin = hap.whole.begin.valueOf();
+    const duration = hap.whole.duration.valueOf();
+    const points = Math.max(2, Math.ceil(duration * pointsPerCycle) + 1);
+    const curve = [];
+    let last;
+    // the last point is taken just before the note ends: at the end itself, a signal like saw has
+    // already wrapped around, which would bend the end of the curve back
+    // (an exact fraction: a float this close to the end would be rounded back to it)
+    const justBeforeEnd = hap.whole.end.sub(Fraction(1).div(1e9));
+    for (let k = 0; k < points; k++) {
+      const t = k === points - 1 ? justBeforeEnd : begin + (duration * k) / (points - 1);
+      last = sampleAt(signal, t) ?? last;
+      curve.push(last);
+    }
+    if (curve.some((x) => x === undefined)) {
+      // the signal has no value at the start of the note: fill in the first value it has
+      const first = curve.find((x) => x !== undefined);
+      if (first === undefined) {
+        return hap;
+      }
+      curve.forEach((x, k) => (curve[k] = x ?? first));
+    }
+    const auto = { __ids: new Set(v.auto?.__ids) };
+    for (const key of auto.__ids) {
+      auto[key] = v.auto[key];
+    }
+    const key = id ?? auto.__ids.size;
+    auto[key] = { control, curve };
+    auto.__ids.add(key);
+    // engines without automation still start the note at the right value
+    v[control] = curve[0];
+    v.auto = auto;
+    return hap.withValue(() => v);
+  });
+};
 
 /**
  * Modulates with the output from a given `bus`.
