@@ -120,3 +120,12 @@ Full three-tier run, all cells re-measured this date after the final-review fixe
 - Found by running the browser probes on WebKitGTK:
   - superdough set `destination.channelCount = maxChannelCount`, which throws ("Channel count cannot be 0") when an engine reports 0; it is now only set when positive. This broke every live probe on desktop.
   - JavaScriptCore (Safari, WebKitGTK) ignores `//# sourceURL` in `Function()` code and reports a failed call at its "(", which the source map assigns to the whole call. Runtime errors now fall back to `err.line`/`err.column`, and a position on a call's "(" maps to the callee: LANG-1 passes on desktop, and Safari users get the same error locations.
+
+## Test suite flake (2026-10-02, unexplained)
+
+One full run (`npm run test`, right after desktop probe runs) failed 12 example snapshot tests in
+test/examples.test.mjs: byteBeatExpression, layer, superimpose, inside, outside, apply, iter,
+iterBack, saw #1, isaw #1, scaleTranspose, scale #4. Not reproduced in 11 later runs: plain,
+file-order shuffled (6 seeds), and with doc.json regeneration. (Shuffling tests *within* files fails
+30-40 tests on every seed: upstream test files depend on their own order.) If it recurs, keep the
+failure output: the messages are needed to find the cause.
