@@ -102,6 +102,7 @@ Full three-tier run, all cells re-measured this date after the final-review fixe
   sudo dnf install ./surge-xt-x86_64-1.3.4.rpm
   ```
   This installs the plugin to `/usr/lib64/clap/Surge XT.clap`, which is one of the paths PLUG-1 already searches.
+  - **Ran 2026-10-02 (desktop: pass).** Surge XT 1.3.4's CLAP was extracted from the official RPM into `~/.clap/Surge XT.clap` (a per-user CLAP path the probe searches; no system install). The probe's Rust host loaded it, delivered the 8 events of `note("c4 e4 g4 c5")`, and rendered audio (rms 0.084, peak 0.45). This proves CLAP hosting from Rust with Strudel's events; the desktop app does not yet route plugin audio into its live output.
 - **PLUG-1 (cli: not-run, opt):** no probe yet.
 
 ### Language front end (LANG)

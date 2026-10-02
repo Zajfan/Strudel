@@ -438,20 +438,27 @@
       }
     },
     "PLUG-1": {
-      "status": "not-run",
-      "metrics": {},
+      "status": "pass",
+      "metrics": {
+        "exitCode": 0,
+        "seconds": 4,
+        "plugin": "~/.clap/Surge XT.clap",
+        "patternEvents": 8,
+        "pluginId": "org.surge-synth-team.surge-xt",
+        "pluginName": "Surge XT",
+        "frames": 72000,
+        "rms": 0.08421546102597782,
+        "peak": 0.45054304599761963,
+        "eventsDelivered": 8,
+        "headline": "Surge XT via clack-host"
+      },
       "notes": {
-        "reason": "Surge XT not installed (see follow-ups doc for the install command)",
-        "searched": [
-          "/usr/lib/clap/Surge XT.clap",
-          "/usr/lib64/clap/Surge XT.clap",
-          "~/.clap/Surge XT.clap"
-        ]
+        "pattern": "note(\"c4 e4 g4 c5\")"
       },
       "run": {
-        "ranAt": "2026-10-02T11:43:57.174Z",
-        "commit": "54d20dc7",
-        "dirty": true,
+        "ranAt": "2026-10-02T11:47:15.477Z",
+        "commit": "dcf2c544",
+        "dirty": false,
         "source": "probe",
         "node": "v22.21.1",
         "platform": "linux-x64",
