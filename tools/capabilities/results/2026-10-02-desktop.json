@@ -465,26 +465,35 @@
     "PLUG-1": {
       "status": "pass",
       "metrics": {
-        "plugins": [
-          "Surge XT"
+        "pluginNotes": 4,
+        "referenceNotes": 4,
+        "syncOffsetsMs": [
+          1.45,
+          0.07,
+          1.04,
+          1.2
         ],
-        "device": "strudel_null",
-        "loadedAfterUnload": [],
-        "notes": 13,
-        "lateNotes": 0,
-        "expectedNotes": 12,
-        "rms": 0.10113987462603946,
-        "peak": 0.26691386103630066,
-        "capturedSamples": 882000,
-        "headline": "Surge XT live: 13 notes, 0 late, rms 0.101"
+        "maxSyncOffsetMs": 1.4512471655328798,
+        "pluginRms": 0.040466323080623444,
+        "masterRms": 0.05099128791920657,
+        "reverbTailGainDb": 91.67567722273127,
+        "native": {
+          "notes": 13,
+          "lateNotes": 0,
+          "device": "strudel_null",
+          "rms": 0.10064572438668293,
+          "loadedAfterUnload": []
+        },
+        "headline": "Surge XT in the mixer: within 1.5 ms of the beat, room +91.7 dB; native: 13 notes"
       },
       "notes": {
-        "code": "setcps(1)\nnote(\"c4 e4 g4 c5\").clap('Surge XT')",
-        "engine": "native CLAP host in the desktop app, on the silent device strudel_null"
+        "plugin": "Surge XT",
+        "mixer": "setcps(1)\n$: note(\"c4 ~ ~ ~\").clap('Surge XT').room(ROOM)\n$: note(\"c6 ~ ~ ~\").s(\"sine\").gain(0.3).release(0.05).orbit(3)",
+        "native": "setcps(1)\nnote(\"c4 e4 g4 c5\").clap('Surge XT', { output: 'native' })"
       },
       "run": {
-        "ranAt": "2026-10-02T20:22:57.706Z",
-        "commit": "e89ed659",
+        "ranAt": "2026-10-02T20:38:51.313Z",
+        "commit": "7daa8a30",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",

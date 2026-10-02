@@ -34,6 +34,7 @@ fn main() {
     .plugin(tauri_plugin_fs::init())
     .manage(audio::cue::CueState::default())
     .manage(audio::plugins::PluginEngine::default())
+    .manage(audio::mixer::MixerEngine::default())
     .invoke_handler(
       tauri::generate_handler![
         midibridge::sendmidi,
@@ -51,7 +52,10 @@ fn main() {
         audio::engine_capture,
         audio::engine_set_device,
         audio::clap_loaded,
-        audio::clap_unload
+        audio::clap_unload,
+        audio::mix_load,
+        audio::mix_notes,
+        audio::mix_render
       ]
     )
     .setup(|app| {

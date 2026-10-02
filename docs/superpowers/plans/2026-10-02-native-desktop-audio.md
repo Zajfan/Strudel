@@ -45,6 +45,14 @@ WebKitGTK (the desktop webview) cannot play to a second output device (no `setSi
   (`unloadClap`, `loadedClaps`): the audio thread stops the plugin's processor and hands it back to
   its host thread, which deactivates and unloads it. A device change unloads all plugins, moves the
   stream and reloads them.
-- No plugin GUIs, parameter automation (`auto`) or effects on plugin audio yet.
-- Plugin audio and the webview's audio reach the OS mixer separately; their alignment rests on the
-  clock bridge (WebKitGTK's output latency is estimated, not reported).
+- Done 2026-10-02: plugins in Strudel's mixer, the default for `.clap()`. The page plays each plugin
+  as a stream (an AudioWorklet player per plugin) through superdough's `getExternalChannel`, so
+  orbit-level controls apply (orbit, gain, pan, delay, room, ducking, cue, stems) and there is one
+  output. Rust renders on request (`mix_load`, `mix_notes`, `mix_render`, src-tauri/src/audio/mixer.rs)
+  for frames of the page's audio clock, at most ~60 ms ahead (notes come ~100 ms early); notes are
+  placed at their exact frame. Measured: plugin notes within 1.5 ms of superdough notes scheduled at
+  the same times (Surge XT's own 16-frame blocks and attack). `.clap(name, { output: 'native' })`
+  keeps the native output (lower latency, no Strudel effects).
+- Per-voice controls (filters, envelopes) don't apply to a plugin stream; exports (offline renders)
+  don't include plugins yet (the player pulls asynchronously).
+- Next: parameter automation (`.auto()` on plugin parameters), then plugin GUIs (floating windows).

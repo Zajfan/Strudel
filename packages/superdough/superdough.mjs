@@ -354,6 +354,80 @@ export function setSuperdoughAudioController(newController) {
   return controller;
 }
 
+// External sources: continuous streams from outside superdough (e.g. CLAP plugins rendered by the
+// desktop backend) played through an orbit like superdough's own voices. A channel has an `input`
+// for the stream, then gain, pan and post-gain, and sends to its orbit's delay and reverb.
+// update(value, t, cps) applies a hap's orbit-level controls from time t: orbit and cue (routing), gain,
+// postgain, pan, delay/delaytime/delayfeedback and room/roomsize/roomfade/roomlp/roomdim; ducking
+// comes with the orbit. Per-voice controls (filters, envelopes) don't apply to a whole stream.
+const externalChannels = new Map();
+export function getExternalChannel(key) {
+  let channel = externalChannels.get(key);
+  const ac = getAudioContext();
+  if (channel && channel.ac === ac) {
+    return channel;
+  }
+  const input = new GainNode(ac, { channelCount: 2, channelCountMode: 'explicit' });
+  const panner = new StereoPannerNode(ac);
+  const post = new GainNode(ac);
+  input.connect(panner).connect(post);
+  let orbitBus;
+  let routeKey;
+  let delaySend;
+  let reverbSend;
+  channel = {
+    ac,
+    input,
+    update(value, t, cps = 0.5) {
+      // the hap's value, else superdough's default, else `fallback` (not every control has a default)
+      const v = (key, fallback) => {
+        const x = Number(value[key] ?? getDefaultValue(key) ?? fallback);
+        return Number.isFinite(x) ? x : fallback;
+      };
+      const controller = getSuperdoughAudioController();
+      const orbit = v('orbit', 1);
+      const cue = !!value.cue && !(ac instanceof OfflineAudioContext);
+      const nextRoute = `${orbit}:${cue}`;
+      if (nextRoute !== routeKey) {
+        post.disconnect();
+        delaySend?.disconnect();
+        reverbSend?.disconnect();
+        delaySend = reverbSend = undefined;
+        orbitBus = controller.getOrbit(orbit, mapChannelNumbers(getDefaultValue('channels')), cue);
+        orbitBus.connectToOutput(post);
+        routeKey = nextRoute;
+      }
+      input.gain.setValueAtTime(applyGainCurve(v('gain', 1)), t);
+      post.gain.setValueAtTime(applyGainCurve(v('postgain', 1)), t);
+      panner.pan.setValueAtTime(2 * v('pan', 0.5) - 1, t);
+      const delay = applyGainCurve(v('delay', 0));
+      if (delay > 0) {
+        const delaytime = value.delaytime ?? cycleToSeconds(v('delaysync', 3 / 16), cps);
+        orbitBus.getDelay(delaytime, v('delayfeedback', 0.5), t);
+        delaySend ??= orbitBus.sendDelay(post, 0);
+      }
+      delaySend?.gain.setValueAtTime(delay, t);
+      const room = v('room', 0);
+      if (room > 0) {
+        // unset parameters pass through, as for superdough's voices: the reverb has its own defaults
+        orbitBus.getReverb(value.roomsize, value.roomfade, value.roomlp, value.roomdim);
+        reverbSend ??= orbitBus.sendReverb(post, 0);
+      }
+      reverbSend?.gain.setValueAtTime(room, t);
+    },
+    disconnect() {
+      input.disconnect();
+      panner.disconnect();
+      post.disconnect();
+      delaySend?.disconnect();
+      reverbSend?.disconnect();
+      externalChannels.delete(key);
+    },
+  };
+  externalChannels.set(key, channel);
+  return channel;
+}
+
 // The default cue output provider: the browser's MediaStream + <audio> + setSinkId (CueOutput).
 setCueOutputProvider({
   available: () => typeof HTMLMediaElement !== 'undefined' && typeof HTMLMediaElement.prototype.setSinkId === 'function',

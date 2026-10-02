@@ -29,8 +29,8 @@ use rtrb::{ Producer, RingBuffer };
 use serde::{ Deserialize, Serialize };
 
 // largest block a plugin is asked to render at once; bigger device blocks are split
-const BLOCK: usize = 512;
-const CHANNELS: usize = 2;
+pub(crate) const BLOCK: usize = 512;
+pub(crate) const CHANNELS: usize = 2;
 const CAPTURE_SECONDS: usize = 10;
 
 // ------------------------------------------------------------------ CLAP host side
@@ -164,8 +164,8 @@ fn find_plugin(name: &str) -> Result<PathBuf, String> {
 // A plugin activated on its host thread, ready for the audio thread. When it is removed, the audio
 // thread stops its processor and sends it back through `retire`, so the host thread can deactivate
 // the plugin (CLAP: on its main thread) and unload it.
-struct NewSlot {
-  index: usize,
+pub(crate) struct NewSlot {
+  pub(crate) index: usize,
   processor: StoppedPluginAudioProcessor<Host>,
   layout: Layout,
   retire: Sender<StoppedPluginAudioProcessor<Host>>,
@@ -178,7 +178,7 @@ enum AudioCommand {
 }
 
 // Loads the plugin on a new host thread, which keeps servicing it; returns its activated processor.
-fn load_plugin(name: &str, index: usize, sample_rate: f64) -> Result<(NewSlot, std::thread::JoinHandle<()>), String> {
+pub(crate) fn load_plugin(name: &str, index: usize, sample_rate: f64) -> Result<(NewSlot, std::thread::JoinHandle<()>), String> {
   let path = find_plugin(name)?;
   let (ready, loaded) = channel::<Result<NewSlot, String>>();
   let (retire, retired) = channel::<StoppedPluginAudioProcessor<Host>>();
@@ -232,15 +232,15 @@ fn load_plugin(name: &str, index: usize, sample_rate: f64) -> Result<(NewSlot, s
 // ------------------------------------------------------------------ audio side
 
 #[derive(Clone, Copy)]
-struct NoteEvent {
-  plugin: usize,
-  due: Instant,
-  key: u8,
-  velocity: f64,
-  on: bool,
+pub(crate) struct NoteEvent {
+  pub(crate) plugin: usize,
+  pub(crate) due: Instant,
+  pub(crate) key: u8,
+  pub(crate) velocity: f64,
+  pub(crate) on: bool,
 }
 
-struct Slot {
+pub(crate) struct Slot {
   index: usize,
   processor: StartedPluginAudioProcessor<Host>,
   retire: Sender<StoppedPluginAudioProcessor<Host>>,
@@ -255,7 +255,7 @@ struct Slot {
 }
 
 impl Slot {
-  fn new(new: NewSlot) -> Result<Self, String> {
+  pub(crate) fn new(new: NewSlot) -> Result<Self, String> {
     let processor = new.processor.start_processing().map_err(|e| e.to_string())?;
     let l = &new.layout;
     Ok(Slot {
@@ -274,12 +274,12 @@ impl Slot {
   }
 
   // Stops the plugin's processing and hands the processor back to its host thread.
-  fn retire(self) {
+  pub(crate) fn retire(self) {
     let _ = self.retire.send(self.processor.stop_processing());
   }
 
   // Renders n frames with the given (offset, event) notes and adds them into out (interleaved).
-  fn render_into(&mut self, out: &mut [f32], n: usize, notes: &[(u32, NoteEvent)]) {
+  pub(crate) fn render_into(&mut self, out: &mut [f32], n: usize, notes: &[(u32, NoteEvent)]) {
     self.events_in.clear();
     self.events_out.clear();
     let port = self.layout.note_port;
@@ -678,7 +678,7 @@ mod tests {
       println!("Surge XT or ALSA missing, skipping");
       return;
     }
-    std::env::set_var("ALSA_CONFIG_PATH", crate::audio::cue::tests::silent_alsa_config());
+    crate::audio::cue::tests::silent_alsa_config();
     let engine = PluginEngine::default();
     engine.start(Some("strudel_null".to_string())).unwrap();
     engine.capture(true);
@@ -710,7 +710,7 @@ mod tests {
       println!("Surge XT or ALSA missing, skipping");
       return;
     }
-    std::env::set_var("ALSA_CONFIG_PATH", crate::audio::cue::tests::silent_alsa_config());
+    crate::audio::cue::tests::silent_alsa_config();
     let engine = PluginEngine::default();
     engine.start(Some("strudel_null".to_string())).unwrap();
     engine.load("Surge XT").unwrap();

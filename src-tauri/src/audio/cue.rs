@@ -304,13 +304,19 @@ pub(crate) mod tests {
   // An ALSA config that adds a device discarding all audio (cpal doesn't list ALSA's own "null"),
   // so tests and probes can play without sound. Set as ALSA_CONFIG_PATH before ALSA is first used.
   pub fn silent_alsa_config() -> std::path::PathBuf {
-    let path = std::env::temp_dir().join("strudel-cue-test-asound.conf");
-    std::fs::write(
-      &path,
-      "</usr/share/alsa/alsa.conf>\npcm.strudel_null { type null; hint { show on; description \"Strudel test sink (discards audio)\" } }\n",
-    )
-    .unwrap();
-    path
+    // written and set once per process: tests run in parallel, and ALSA reads it while they do
+    static CONFIG: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+    CONFIG.get_or_init(|| {
+      let path = std::env::temp_dir().join(format!("strudel-cue-test-asound-{}.conf", std::process::id()));
+      std::fs::write(
+        &path,
+        "</usr/share/alsa/alsa.conf>\npcm.strudel_null { type null; hint { show on; description \"Strudel test sink (discards audio)\" } }\n",
+      )
+      .unwrap();
+      std::env::set_var("ALSA_CONFIG_PATH", &path);
+      path
+    })
+    .clone()
   }
 
   #[test]
@@ -319,7 +325,7 @@ pub(crate) mod tests {
       println!("no ALSA, skipping");
       return;
     }
-    std::env::set_var("ALSA_CONFIG_PATH", silent_alsa_config());
+    silent_alsa_config();
     let names = devices().unwrap();
     assert!(names.iter().any(|d| d == "strudel_null"), "devices: {:?}", names);
     let state = CueState::default();
