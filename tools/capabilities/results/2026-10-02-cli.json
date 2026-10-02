@@ -90,7 +90,7 @@
       }
     },
     "AUT-1": {
-      "status": "fail",
+      "status": "pass",
       "metrics": {
         "events": 16,
         "maxErrorMs": 0.08333333333333333,
@@ -178,19 +178,18 @@
           }
         ],
         "ramp": {
-          "firstRms": 0.0014142135636081431,
-          "lastRms": 0.0014142135636081431,
-          "changeDb": 0
+          "maxErrorMs": 0.11006981562635317,
+          "windows": 960
         },
-        "headline": "stepped only"
+        "headline": "0.083 ms stepped, 0.110 ms ramp"
       },
       "notes": {
-        "resolution": "measures onset timing of 16 stepped values per cycle, one per event",
-        "error": "automation is sampled once per event; no continuous ramp within a held note"
+        "resolution": "onset timing of 16 stepped values per cycle; ramp timing per 1 ms period of a 1 kHz tone",
+        "ramp": "gain automated 0.1 -> 1 over one held note with auto(saw.range(0.1, 1))"
       },
       "run": {
-        "ranAt": "2026-09-29T12:17:18.424Z",
-        "commit": "96df6ef6",
+        "ranAt": "2026-10-02T10:37:59.149Z",
+        "commit": "bee69eee",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
@@ -273,14 +272,14 @@
       "metrics": {
         "events": 1115,
         "audioSeconds": 65,
-        "renderSeconds": 15.403248288999999,
-        "realtimeFactor": 4.219889128607943,
+        "renderSeconds": 15.316375906000001,
+        "realtimeFactor": 4.24382376085044,
         "headline": "4.2x real time"
       },
       "notes": {},
       "run": {
-        "ranAt": "2026-10-02T10:28:05.813Z",
-        "commit": "a116a81d",
+        "ranAt": "2026-10-02T10:38:14.733Z",
+        "commit": "bee69eee",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",

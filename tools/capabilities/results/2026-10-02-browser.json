@@ -123,7 +123,7 @@
       }
     },
     "AUT-1": {
-      "status": "fail",
+      "status": "pass",
       "metrics": {
         "events": 16,
         "maxErrorMs": 0.041666666666666664,
@@ -211,25 +211,24 @@
           }
         ],
         "ramp": {
-          "firstRms": 0.021213200196507603,
-          "lastRms": 0.021213200205587816,
-          "changeDb": 3.717954903225806e-9
+          "maxErrorMs": 0.0002726730927777371,
+          "windows": 960
         },
-        "headline": "stepped only"
+        "headline": "0.042 ms stepped, 0.000 ms ramp"
       },
       "notes": {
         "engine": "superdough",
-        "resolution": "measures onset timing of 16 stepped values per cycle, one per event",
-        "error": "automation is sampled once per event; no continuous ramp within a held note"
+        "resolution": "onset timing of 16 stepped values per cycle; ramp timing per 1 ms period of a 1 kHz tone",
+        "ramp": "gain automated 0.1 -> 1 over one held note with auto(saw.range(0.1, 1)), offline render"
       },
       "run": {
-        "ranAt": "2026-10-02T04:44:06.262Z",
-        "commit": "3dc3478e",
+        "ranAt": "2026-10-02T10:37:58.954Z",
+        "commit": "bee69eee",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
         "platform": "linux-x64",
-        "distBuiltAt": "2026-10-02T04:40:23.319Z",
+        "distBuiltAt": "2026-10-02T10:37:57.288Z",
         "thresholds": {
           "maxErrorMs": 1
         }

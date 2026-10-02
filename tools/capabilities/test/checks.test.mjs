@@ -10,6 +10,8 @@ import {
   isStemApiName,
   judgeArrangement,
   judgeMix,
+  calibrateGain,
+  rampTiming,
   judgeStems,
   liveGap,
   locateError,
@@ -279,5 +281,30 @@ describe('judgeMix', () => {
     const threeBuses = good();
     threeBuses.stems.delete(4);
     expect(judgeMix(threeBuses, shape, { minDuckDb: 6 }).problems.join()).toMatch(/buses 1,2,3/);
+  });
+});
+
+describe('rampTiming', () => {
+  const sr = 48000;
+  const period = 48; // 1 kHz
+  const tone = (gainAt, seconds) => Float32Array.from({ length: seconds * sr }, (_, i) => gainAt(i / sr) ** 2 * Math.sin((2 * Math.PI * i) / period));
+  // a squared gain law, so the calibration has to do real work
+  const steps = 91;
+  const calSeconds = 6;
+  const calibration = calibrateGain(
+    tone((t) => 0.1 + (0.9 * Math.min(steps - 1, Math.floor((t * steps) / calSeconds))) / (steps - 1), calSeconds),
+    sr,
+    { steps, seconds: calSeconds, from: 0.1, to: 1, period },
+  );
+  const shape = { begin: 0, duration: 1, from: 0.1, to: 1, period };
+  it('measures well under a millisecond for a ramp on time', () => {
+    const r = rampTiming(tone((t) => 0.1 + 0.9 * t, 1), sr, shape, calibration);
+    expect(r.windows).toBeGreaterThan(900);
+    expect(r.maxErrorMs).toBeLessThan(0.3);
+  });
+  it('measures a ramp 5 ms late as about 5 ms', () => {
+    const r = rampTiming(tone((t) => 0.1 + 0.9 * Math.max(0, t - 0.005), 1), sr, shape, calibration);
+    expect(r.maxErrorMs).toBeGreaterThan(4.5);
+    expect(r.maxErrorMs).toBeLessThan(5.5);
   });
 });

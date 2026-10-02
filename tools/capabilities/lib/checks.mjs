@@ -115,6 +115,48 @@ export function rampWithinNote(samples, sampleRate, { cps }) {
   return { firstRms, lastRms, changeDb: toDb(lastRms / firstRms) };
 }
 
+// AUT-1: amplitude of a test tone at each of its gains, from a render of calibrationPattern():
+// `steps` notes of equal length in `seconds`, gains from..to. Measured as RMS * sqrt(2) over whole
+// periods in the middle of each note. Returns [{ gain, amplitude }] in ascending gain.
+export function calibrateGain(samples, sampleRate, { steps, seconds, from, to, period }) {
+  const noteLen = (seconds * sampleRate) / steps;
+  return Array.from({ length: steps }, (_, k) => {
+    const middle = Math.round(k * noteLen + noteLen / 2);
+    const amplitude = windowRms(samples, middle - 2 * period, middle + 2 * period) * Math.SQRT2;
+    return { gain: from + ((to - from) * k) / (steps - 1), amplitude };
+  });
+}
+
+// gain for a measured amplitude, by linear interpolation in the calibration table
+export function gainForAmplitude(calibration, amplitude) {
+  if (amplitude <= calibration[0].amplitude) return calibration[0].gain;
+  for (let k = 1; k < calibration.length; k++) {
+    const [a, b] = [calibration[k - 1], calibration[k]];
+    if (amplitude <= b.amplitude) return a.gain + ((b.gain - a.gain) * (amplitude - a.amplitude)) / (b.amplitude - a.amplitude);
+  }
+  return calibration.at(-1).gain;
+}
+
+// AUT-1: timing error of a gain ramp from `from` to `to` over [begin, begin + duration] seconds.
+// Per period of the test tone, RMS gives the amplitude, the calibration turns it into a gain, and
+// the gap to the expected gain at that time, divided by the ramp's slope, is a timing error (how
+// early or late the measured gain is). `edge` seconds at both ends are skipped (note on/off).
+export function rampTiming(samples, sampleRate, { begin, duration, from, to, period, edge = 0.02 }, calibration) {
+  const slope = (to - from) / duration; // gain per second
+  let maxErrorMs = 0;
+  let windows = 0;
+  const first = Math.round((begin + edge) * sampleRate);
+  const last = Math.round((begin + duration - edge) * sampleRate) - period;
+  for (let start = first; start <= last; start += period) {
+    const t = (start + period / 2) / sampleRate;
+    const gain = gainForAmplitude(calibration, windowRms(samples, start, start + period) * Math.SQRT2);
+    const expected = from + slope * (t - begin);
+    maxErrorMs = Math.max(maxErrorMs, (Math.abs(gain - expected) / slope) * 1000);
+    windows++;
+  }
+  return { maxErrorMs, windows };
+}
+
 export function stemResidual(mix, stems) {
   let worst = 0;
   for (let i = 0; i < mix.length; i++) {

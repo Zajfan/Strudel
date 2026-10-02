@@ -69,6 +69,7 @@ Full three-tier run, all cells re-measured this date after the final-review fixe
 
 ### Sub-project 3 — Automation (AUT)
 - **AUT-1 (cli, browser: fail):** automation values are sampled once per event, not continuously. The probe holds a note across a ramp and measures a 0 dB change in level within the held note ("stepped only") — onset timing of the 16 stepped values is accurate (worst case ~0.08 ms), but there is no interpolation between them. When a ramp appears, the cell becomes `not-run` (partial: ramp timing not measured) until the probe times the ramp itself.
+  - **Fixed 2026-10-02 (cli, browser: pass).** New `auto(signal, { c, res }, id)` modulator (`packages/core/controls.mjs`), in the style of `lfo`/`env`: it samples a signal over each note's span on song time (128 points per cycle by default, last point just before the note's end) into `value.auto`, and sets the control to the curve's first value. superdough plays the curve through a ConstantSourceNode offset (`connectAutomation`, `setValueCurveAtTime`), converting gain-curve controls and pan to param units; supradough interpolates it per sample (`DoughVoice.applyAutomation`). The probes now time the ramp: per 1 ms period of a 1 kHz tone, amplitude is mapped back to gain through a calibration render (91 constant-gain notes), so the engine's gain law doesn't matter (supradough's is squared). Ramp timing error: 0.110 ms (CLI), 0.0003 ms (browser).
 - **AUT-1 (desktop: not-run):** no probe yet.
 
 ### Sub-project 4 — Offline render and export (EXP)

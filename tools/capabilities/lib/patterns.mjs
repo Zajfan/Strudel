@@ -1,6 +1,6 @@
 // Test patterns built from Strudel globals only, so each builder can also run
 // in the browser page via fn.toString(). Call loadScope() first in Node.
-/* global arrange, note, sequence, pure, saw, silence, stack */
+/* global arrange, gain, note, s, sequence, pure, saw, silence, stack */
 
 export const ARRANGEMENT = { sections: 8, bars: 8 };
 
@@ -56,8 +56,20 @@ export function automationPattern() {
   return note(69).s('sine').fast(16).clip(0.5).attack(0).release(0.002).gain(saw.range(0.2, 1));
 }
 
+// AUT-1 ramp: one held note of a 1 kHz sine (exactly 48 samples per period at 48 kHz), its gain
+// automated from 0.1 to 1 over the note with `auto`. calibrationPattern() plays the same tone at
+// constant gains 0.10, 0.11, ... 1.00, one per step, so a probe can map measured amplitude back to
+// gain without knowing the engine's gain law.
+export const RAMP = { cps: 1, from: 0.1, to: 1, freq: 1000, calibrationSteps: 91, calibrationCycles: 6 };
+
 export function rampPattern() {
-  return note(57).s('sine').attack(0).release(0.01).clip(1).gain(saw.range(0.1, 1));
+  return s('sine').freq(1000).attack(0).release(0.01).clip(1).gain(1).auto(saw.range(0.1, 1));
+}
+
+export function calibrationPattern() {
+  const gains = Array.from({ length: 91 }, (_, k) => Math.round(10 + k) / 100);
+  // the gains first, so they give the structure: one note per gain
+  return gain(sequence(...gains)).s('sine').freq(1000).attack(0).release(0.002).clip(1).slow(6);
 }
 
 export const DUCK = { cps: 1, triggerAt: 0.25 };
