@@ -49,6 +49,7 @@ export class NeoCyclist {
             onTrigger?.(hap, 0, duration, this.cps, targetTime);
           }
         });
+        this.stopAtEnd(end);
       } catch (e) {
         errorLogger(e, 'neocyclist');
         onError?.(e);
@@ -76,6 +77,19 @@ export class NeoCyclist {
   now() {
     const gap = (this.getTime() - this.time_at_last_tick_message) * this.cps;
     return this.cycle + gap;
+  }
+  // same as Cyclist.stopAtEnd
+  stopAtEnd(queriedUntil) {
+    const pattern = this.pattern;
+    if (pattern?._end === undefined || queriedUntil < pattern._end.valueOf()) {
+      return;
+    }
+    queueMicrotask(() => {
+      if (this.started && this.pattern === pattern) {
+        logger('[cyclist] pattern ended');
+        this.stop();
+      }
+    });
   }
   setCps(cps = 1) {
     this.sendMessage('cpschange', { cps });

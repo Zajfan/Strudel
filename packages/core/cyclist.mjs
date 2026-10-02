@@ -76,6 +76,7 @@ export class Cyclist {
               }
             }
           });
+          this.stopAtEnd(end);
         } catch (e) {
           errorLogger(e);
           onError?.(e);
@@ -126,6 +127,20 @@ export class Cyclist {
     if (autostart && !this.started) {
       await this.start();
     }
+  }
+  // a pattern that ends (see Pattern.once) stops the transport once everything up to its end is
+  // scheduled. Deferred, because stopping resets the clock, which is still looping through this tick.
+  stopAtEnd(queriedUntil) {
+    const pattern = this.pattern;
+    if (pattern?._end === undefined || queriedUntil < pattern._end.valueOf()) {
+      return;
+    }
+    queueMicrotask(() => {
+      if (this.started && this.pattern === pattern) {
+        logger('[cyclist] pattern ended');
+        this.stop();
+      }
+    });
   }
   setCps(cps = 0.5) {
     if (this.cps === cps) {

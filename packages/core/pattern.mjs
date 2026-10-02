@@ -41,6 +41,16 @@ export const calculateSteps = function (x) {
 // intended to use with mini to automatically interpret all strings as mini notation
 export const setStringParser = (parser) => (stringParser = parser);
 
+// Song-length metadata: _period is the number of cycles after which a pattern repeats (set by
+// arrange), _end the cycle from which it is silent for good (set by once). Only operations that keep
+// the time structure carry them over (values, controls, context, filtering, query state); anything
+// else, e.g. fast or early, drops them rather than keeping a wrong value.
+function keepLength(result, pat) {
+  result._period = pat._period;
+  result._end = pat._end;
+  return result;
+}
+
 /** @class Class representing a pattern. */
 export class Pattern {
   /**
@@ -95,12 +105,12 @@ export class Pattern {
   withValue(func) {
     const result = new Pattern((state) => this.query(state).map((hap) => hap.withValue(func)));
     result._steps = this._steps;
-    return result;
+    return keepLength(result, this);
   }
 
   // runs func on query state
   withState(func) {
-    return new Pattern((state) => this.query(func(state)));
+    return keepLength(new Pattern((state) => this.query(func(state))), this);
   }
 
   /**
@@ -208,7 +218,7 @@ export class Pattern {
     };
     const result = new Pattern(query);
     result._steps = this._steps;
-    return result;
+    return keepLength(result, this);
   }
 
   /**
@@ -512,7 +522,7 @@ export class Pattern {
   withHaps(func) {
     const result = new Pattern((state) => func(this.query(state), state));
     result._steps = this._steps;
-    return result;
+    return keepLength(result, this);
   }
 
   /**
@@ -597,7 +607,7 @@ export class Pattern {
    * s("bd*8").velocity(rand).filterHaps((h) => (h.whole.begin % 1) < h.value.velocity)
    */
   filterHaps(hap_test) {
-    return new Pattern((state) => this.query(state).filter(hap_test));
+    return keepLength(new Pattern((state) => this.query(state).filter(hap_test)), this);
   }
 
   /**
@@ -613,7 +623,38 @@ export class Pattern {
    * bass: s("saw!4").note("G#1").lpf(80).lpenv(4).orbit(2)
    */
   filterValues(value_test) {
-    return new Pattern((state) => this.query(state).filter((hap) => value_test(hap.value))).setSteps(this._steps);
+    return keepLength(
+      new Pattern((state) => this.query(state).filter((hap) => value_test(hap.value))).setSteps(this._steps),
+      this,
+    );
+  }
+
+  /**
+   * Plays the pattern through once from cycle 0, then stays silent. An arrangement plays all of its
+   * sections once, which gives a song a hard ending; when the pattern is played in the REPL, playback
+   * stops at the end. Patterns with no known length (anything but `arrange`, or an arrangement whose
+   * timing was changed afterwards, e.g. with `fast`) play one cycle.
+   * @tags temporal
+   * @returns Pattern
+   * @example
+   * arrange(
+   *   [2, note("c a f e")],
+   *   [1, note("g a b c5")]
+   * ).s("piano").once()
+   */
+  once() {
+    const end = this._period ?? Fraction(1);
+    const result = new Pattern((state) => {
+      if (state.span.begin.gte(end) || state.span.end.lte(0)) {
+        return [];
+      }
+      return this.query(state).filter((hap) => {
+        const begin = hap.wholeOrPart().begin;
+        return begin.gte(0) && begin.lt(end);
+      });
+    }, this._steps);
+    result._end = end;
+    return result;
   }
 
   /**
@@ -1454,6 +1495,10 @@ export function stack(...pats) {
   if (__steps) {
     result._steps = lcm(...pats.map((pat) => pat._steps));
   }
+  // a stack ends when all its layers have ended
+  if (pats.length && pats.every((pat) => pat._end !== undefined)) {
+    result._end = pats.reduce((end, pat) => end.max(pat._end), pats[0]._end);
+  }
   return result;
 }
 
@@ -1602,7 +1647,9 @@ export function cat(...pats) {
 export function arrange(...sections) {
   const total = sections.reduce((sum, [cycles]) => sum + cycles, 0);
   sections = sections.map(([cycles, section]) => [cycles, section.fast(cycles)]);
-  return stepcat(...sections).slow(total);
+  const result = stepcat(...sections).slow(total);
+  result._period = Fraction(total);
+  return result;
 }
 
 /**

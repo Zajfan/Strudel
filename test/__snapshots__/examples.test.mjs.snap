@@ -8559,6 +8559,23 @@ exports[`runs examples > example "onTriggerTime" example index 0 1`] = `
 ]
 `;
 
+exports[`runs examples > example "once" example index 0 1`] = `
+[
+  "[ 0/1 → 1/4 | note:c s:piano ]",
+  "[ 1/4 → 1/2 | note:a s:piano ]",
+  "[ 1/2 → 3/4 | note:f s:piano ]",
+  "[ 3/4 → 1/1 | note:e s:piano ]",
+  "[ 1/1 → 5/4 | note:c s:piano ]",
+  "[ 5/4 → 3/2 | note:a s:piano ]",
+  "[ 3/2 → 7/4 | note:f s:piano ]",
+  "[ 7/4 → 2/1 | note:e s:piano ]",
+  "[ 2/1 → 9/4 | note:g s:piano ]",
+  "[ 9/4 → 5/2 | note:a s:piano ]",
+  "[ 5/2 → 11/4 | note:b s:piano ]",
+  "[ 11/4 → 3/1 | note:c5 s:piano ]",
+]
+`;
+
 exports[`runs examples > example "orbit" example index 0 1`] = `
 [
   "[ 0/1 → 1/6 | s:hh delay:0.5 delaytime:0.25 orbit:1 ]",
