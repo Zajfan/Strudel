@@ -297,10 +297,31 @@
       }
     },
     "SYNC-1": {
-      "status": "not-run",
-      "metrics": {},
+      "status": "pass",
+      "metrics": {
+        "ticks": 1435,
+        "spanSeconds": 59.74983572399999,
+        "longestGapMs": 41.90400800000498,
+        "measuredTicks": 1410,
+        "expectedIntervalMs": 41.666666666666664,
+        "intervalMs": 41.666677233768254,
+        "maxJitterMs": 0.2259353369154269,
+        "rmsJitterMs": 0.045297854360073116,
+        "headline": "0.226 ms max jitter over 1410 ticks"
+      },
       "notes": {
-        "reason": "no probe yet"
+        "route": "strudel play: setcps(0.5); midicmd(\"clock*48\").midi('Midi Through Port-0');  -> ALSA 14:0 -> aseqdump"
+      },
+      "run": {
+        "ranAt": "2026-10-02T17:26:41.973Z",
+        "commit": "8915a1da",
+        "dirty": true,
+        "source": "probe",
+        "node": "v22.21.1",
+        "platform": "linux-x64",
+        "thresholds": {
+          "maxJitterMs": 2
+        }
       }
     },
     "TUNE-1": {

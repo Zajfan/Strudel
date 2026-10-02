@@ -1,0 +1,29 @@
+{
+  "name": "@strudel/cli",
+  "version": "0.1.0",
+  "description": "Play Strudel code from the command line, with MIDI output",
+  "type": "module",
+  "main": "player.mjs",
+  "bin": {
+    "strudel": "./bin/strudel.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://codeberg.org/uzu/strudel.git"
+  },
+  "keywords": [
+    "tidalcycles",
+    "strudel",
+    "pattern",
+    "livecoding",
+    "algorave"
+  ],
+  "license": "AGPL-3.0-or-later",
+  "dependencies": {
+    "@strudel/core": "workspace:*",
+    "@strudel/mini": "workspace:*",
+    "@strudel/tonal": "workspace:*",
+    "@strudel/transpiler": "workspace:*",
+    "jzz": "^1.8.8"
+  }
+}
