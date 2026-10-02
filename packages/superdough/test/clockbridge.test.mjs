@@ -7,7 +7,7 @@ function bridgeWith(offsetAt) {
   const audioContext = {
     getOutputTimestamp: () => ({ performanceTime: now, contextTime: (now - offsetAt(now)) / 1000 }),
   };
-  return { bridge: new ClockBridge(audioContext), advance: (ms) => (now += ms) };
+  return { bridge: new ClockBridge(audioContext, () => now), advance: (ms) => (now += ms) };
 }
 
 describe('ClockBridge', () => {
@@ -44,7 +44,24 @@ describe('ClockBridge', () => {
   });
 
   it('has no offset before the audio clock reports a time', () => {
-    const bridge = new ClockBridge({ getOutputTimestamp: () => ({ performanceTime: 0, contextTime: 0 }) });
+    const bridge = new ClockBridge({ getOutputTimestamp: () => ({ performanceTime: 0, contextTime: 0 }), currentTime: 0 }, () => 5);
     expect(bridge.getPerformanceTime(1)).toBeUndefined();
+  });
+
+  it('ignores output timestamps that run ahead of real time, as WebKitGTK reports them', () => {
+    let now = 1000;
+    const contextTime = () => (now - 1000) / 1000 + 0.5;
+    // performanceTime runs at twice real speed; currentTime is right
+    const audioContext = {
+      getOutputTimestamp: () => ({ contextTime: contextTime(), performanceTime: 1000 + 2 * (now - 1000) }),
+      get currentTime() {
+        return contextTime();
+      },
+      outputLatency: 0.02,
+    };
+    const bridge = new ClockBridge(audioContext, () => now);
+    now += 5000;
+    // the true offset: performance time 6000 ms plays context time 5.5 s, 20 ms of latency later
+    expect(bridge.getOffset()).toBeCloseTo(6000 + 20 - 5500, 6);
   });
 });

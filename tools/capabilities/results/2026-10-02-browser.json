@@ -462,23 +462,23 @@
         "ticks": 1432,
         "measuredTicks": 1407,
         "expectedIntervalMs": 41.666666666666664,
-        "intervalMs": 41.670835668193995,
-        "maxJitterMs": 0.23348332638852298,
-        "rmsJitterMs": 0.06987064270946147,
-        "headline": "0.233 ms max jitter over 1407 ticks"
+        "intervalMs": 41.66540462957845,
+        "maxJitterMs": 1.3198884580488084,
+        "rmsJitterMs": 0.6423148253136647,
+        "headline": "1.320 ms max jitter over 1407 ticks"
       },
       "notes": {
         "route": "midicmd(\"clock*48\").midi('Midi Through Port-0') at 0.5 cps; read back on the loopback input",
         "scope": "headless Chromium, ALSA Midi Through loopback; receive timestamps (event.timeStamp) include the loopback"
       },
       "run": {
-        "ranAt": "2026-10-02T11:41:02.408Z",
-        "commit": "54d20dc7",
+        "ranAt": "2026-10-02T15:24:39.751Z",
+        "commit": "1a0722ba",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
         "platform": "linux-x64",
-        "distBuiltAt": "2026-10-02T11:27:19.583Z",
+        "distBuiltAt": "2026-10-02T15:22:26.878Z",
         "thresholds": {
           "maxJitterMs": 2
         }

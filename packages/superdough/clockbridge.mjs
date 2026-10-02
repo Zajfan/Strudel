@@ -20,6 +20,10 @@ export function expDecay(a, b, decay, dt) {
 const WINDOW_MS = 5000;
 const SAMPLE_EVERY_MS = 20; // readings closer together than this add nothing
 const MAX_SLEW = 0.1; // ms of offset change per second
+// A reading describes the sound being output about now. WebKitGTK's performanceTime runs at twice
+// real speed (measured: 5.0 s after 2.5 s), which would put MIDI and OSC events seconds late; a
+// reading further than this from now is replaced by currentTime plus the reported output latency.
+const MAX_TIMESTAMP_SKEW_MS = 500;
 
 const median = (values) => {
   const sorted = [...values].sort((a, b) => a - b);
@@ -32,15 +36,32 @@ export class ClockBridge {
   lastTime;
   readings = []; // [performanceTime, offset] of the last WINDOW_MS
   audioContext;
-  constructor(audioContext) {
+  // now: the performance clock in ms (injectable for tests)
+  constructor(audioContext, now = () => performance.now()) {
     this.audioContext = audioContext;
+    this.now = now;
+  }
+  // a [contextTime (s), performanceTime (ms)] pair, or undefined while the audio clock isn't running
+  reading() {
+    const ac = this.audioContext;
+    let { contextTime, performanceTime } = ac.getOutputTimestamp?.() ?? {};
+    const now = this.now();
+    if (contextTime > 0 && performanceTime > 0 && Math.abs(performanceTime - now) <= MAX_TIMESTAMP_SKEW_MS) {
+      return [contextTime, performanceTime];
+    }
+    if (ac.currentTime > 0) {
+      const latencyMs = ((ac.outputLatency || 0) + (ac.baseLatency || 0)) * 1000;
+      return [ac.currentTime, now + latencyMs];
+    }
+    return undefined;
   }
   // delta between audio and performance time in ms
   getOffset() {
-    const { contextTime, performanceTime } = this.audioContext.getOutputTimestamp();
-    if (!contextTime || !performanceTime) {
+    const reading = this.reading();
+    if (!reading) {
       return this.p;
     }
+    const [contextTime, performanceTime] = reading;
     const offset = performanceTime - contextTime * 1000; // clock offset in ms
     const lastReading = this.readings.at(-1);
     if (!lastReading || performanceTime - lastReading[0] >= SAMPLE_EVERY_MS) {

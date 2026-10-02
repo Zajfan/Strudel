@@ -471,23 +471,23 @@
     "SYNC-1": {
       "status": "pass",
       "metrics": {
-        "ticks": 1330,
-        "spanSeconds": 55.386081821,
-        "startDelaySeconds": 5.168317567999998,
-        "longestGapMs": 41.908491000009235,
-        "measuredTicks": 1306,
+        "ticks": 1445,
+        "spanSeconds": 60.166622325000006,
+        "startDelaySeconds": 0.1276105320000006,
+        "longestGapMs": 42.07589200000075,
+        "measuredTicks": 1421,
         "expectedIntervalMs": 41.666666666666664,
-        "intervalMs": 41.67499739002966,
-        "maxJitterMs": 0.18642968364292756,
-        "rmsJitterMs": 0.05204118892715285,
-        "headline": "0.186 ms max jitter over 1306 ticks"
+        "intervalMs": 41.666557606828604,
+        "maxJitterMs": 0.6598252953554038,
+        "rmsJitterMs": 0.21608908540555086,
+        "headline": "0.660 ms max jitter over 1421 ticks"
       },
       "notes": {
         "route": "midicmd(\"clock*48\").midi('Midi Through Port-0') at 0.5 cps -> Rust midibridge -> ALSA 14:0 -> aseqdump"
       },
       "run": {
-        "ranAt": "2026-10-02T11:43:57.174Z",
-        "commit": "54d20dc7",
+        "ranAt": "2026-10-02T15:23:38.836Z",
+        "commit": "1a0722ba",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
