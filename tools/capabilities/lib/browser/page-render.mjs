@@ -110,3 +110,36 @@ export async function renderInPage(page, builderFn, { cps, cycles, sampleRate = 
     wav: out.wavHeader == null ? null : { ...parseWavHeader(Buffer.from(out.wavHeader, 'base64')), fileBytes: out.wavBytes },
   };
 }
+
+// Runs in the page; serialized with toString(), so no closures over Node scope.
+async function renderStemsInPageScript({ builderSource, cps, cycles, sampleRate }) {
+  if (typeof globalThis.renderPatternStems !== 'function') return { missing: 'renderPatternStems' };
+  const pattern = (0, eval)(`(${builderSource})`)();
+  const { mix, stems } = await globalThis.renderPatternStems(pattern, cps, 0, cycles, sampleRate, 128);
+  const b64 = (samples) => {
+    const bytes = new Uint8Array(samples.buffer, samples.byteOffset, samples.byteLength);
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(binary);
+  };
+  return {
+    mix: b64(mix.getChannelData(0)),
+    stems: [...stems].map(([orbit, buffer]) => ({ orbit, channels: buffer.numberOfChannels, left: b64(buffer.getChannelData(0)) })),
+  };
+}
+
+// renderStemsInPage(page, builderFn, { cps, cycles, sampleRate }) renders the pattern's stems with
+// the page's renderPatternStems. Returns null if the page has no renderPatternStems, else
+// { mix, stems: Map orbit -> left channel, channels: Map orbit -> channel count, sampleRate }.
+export async function renderStemsInPage(page, builderFn, { cps, cycles, sampleRate = 48000 }) {
+  const out = await withMiniStrings(page, () =>
+    page.evaluate(renderStemsInPageScript, { builderSource: builderFn.toString(), cps, cycles, sampleRate }),
+  );
+  if (out?.missing) return null;
+  return {
+    mix: decodeFloat32(out.mix),
+    stems: new Map(out.stems.map((s) => [s.orbit, decodeFloat32(s.left)])),
+    channels: new Map(out.stems.map((s) => [s.orbit, s.channels])),
+    sampleRate,
+  };
+}

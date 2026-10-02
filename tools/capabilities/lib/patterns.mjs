@@ -69,6 +69,21 @@ export function duckPattern() {
   );
 }
 
+// MIX-1: four buses (orbits). Orbit 1 holds a note and is ducked by a silent sidechain trigger on
+// orbit 2 at duckAt; orbit 3 plays a short note at 0.5 with a delay send, whose echoes must come
+// back on orbit 3 after the note has ended (sendWindow); orbit 4 plays a plain note at 0.5 that has
+// ended by sendWindow. Orbits 3 and 4 start after the duck windows, so the duck is measured on the mix.
+export const MIX = { cps: 1, cycles: 1, duckAt: 0.25, sendWindow: [0.64, 0.7], orbits: [1, 2, 3, 4], ducked: 1, send: 3 };
+
+export function mixPattern() {
+  return stack(
+    note(48).s('sine').orbit(1).gain(0.5).attack(0).release(0.01).clip(1),
+    note(72).s('sine').orbit(2).gain(0).struct('~ x ~ ~').duckorbit(1).duckdepth(1).duckattack(0.1),
+    note(64).s('triangle').orbit(3).gain(0.4).struct('~ ~ x ~').clip(0.25).release(0.01).delay(0.8).delaytime(0.125).delayfeedback(0.5),
+    note(55).s('square').orbit(4).gain(0.1).struct('~ ~ x ~').clip(0.25).release(0.01),
+  );
+}
+
 export function stemPattern() {
   return stack(
     note(48).s('sine').orbit(1).gain(0.3),

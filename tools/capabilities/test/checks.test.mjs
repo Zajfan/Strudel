@@ -9,6 +9,7 @@ import {
   expectedMinStarts,
   isStemApiName,
   judgeArrangement,
+  judgeMix,
   judgeStems,
   liveGap,
   locateError,
@@ -242,5 +243,41 @@ describe('judgeArrangement', () => {
   });
   it('fails with no candidates', () => {
     expect(judgeArrangement([], shape).status).toBe('fail');
+  });
+});
+
+describe('judgeMix', () => {
+  const sr = 1000;
+  const shape = { duckAt: 0.25, sendWindow: [0.64, 0.7], orbits: [1, 2, 3, 4], ducked: 1, send: 3 };
+  const tone = (from, to, level = 0.5) =>
+    Float32Array.from({ length: sr }, (_, i) => (i >= from * sr && i < to * sr ? level * (i % 2 ? 1 : -1) : 0));
+  const good = () => {
+    const ducked = tone(0, 1);
+    for (let i = 0.25 * sr; i < 0.3 * sr; i++) ducked[i] *= 0.01;
+    const stems = new Map([
+      [1, ducked],
+      [2, new Float32Array(sr)],
+      [3, tone(0.5, 0.75)], // the note plus its delay return
+      [4, tone(0.5, 0.6)],
+    ]);
+    const mix = Float32Array.from({ length: sr }, (_, i) => [...stems.values()].reduce((sum, s) => sum + s[i], 0));
+    return { stems, mix, sampleRate: sr };
+  };
+  it('passes with four buses, a send return on its own bus, and a duck', () => {
+    const r = judgeMix(good(), shape, { minDuckDb: 6 });
+    expect(r.problems).toEqual([]);
+    expect(r.status).toBe('pass');
+  });
+  it('fails without the duck, the send return, or a bus', () => {
+    const noDuck = good();
+    noDuck.stems.set(1, tone(0, 1));
+    noDuck.mix = tone(0, 1);
+    expect(judgeMix(noDuck, shape, { minDuckDb: 6 }).problems.join()).toMatch(/ducking/);
+    const noSend = good();
+    noSend.stems.set(3, tone(0.5, 0.6));
+    expect(judgeMix(noSend, shape, { minDuckDb: 6 }).problems.join()).toMatch(/no delay return/);
+    const threeBuses = good();
+    threeBuses.stems.delete(4);
+    expect(judgeMix(threeBuses, shape, { minDuckDb: 6 }).problems.join()).toMatch(/buses 1,2,3/);
   });
 });

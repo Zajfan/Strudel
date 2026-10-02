@@ -57,24 +57,24 @@
       }
     },
     "MIX-1": {
-      "status": "not-run",
+      "status": "pass",
       "metrics": {
         "triggers": 3,
         "drops": [
           {
-            "atSample": 17790,
+            "atSample": 22910,
             "beforeRms": 0.10757157744985496,
             "afterRms": 0.002276125185450208,
             "dropDb": 33.49002785890473
           },
           {
-            "atSample": 65790,
+            "atSample": 70910,
             "beforeRms": 0.10757157744985496,
             "afterRms": 0.002276125185450208,
             "dropDb": 33.49002785890473
           },
           {
-            "atSample": 113790,
+            "atSample": 118910,
             "beforeRms": 0.10757157744985496,
             "afterRms": 0.002276125185450208,
             "dropDb": 33.49002785890473
@@ -82,26 +82,41 @@
         ],
         "dropDb": 33.49002785890473,
         "beforeRms": 0.10757157744985496,
-        "recordedSamples": 145408,
+        "recordedSamples": 151040,
         "sampleRate": 48000,
-        "offlineDropDb": 16.008822261369737,
-        "headline": "33.5 dB duck (live)"
+        "offline": {
+          "orbits": [
+            1,
+            2,
+            3,
+            4
+          ],
+          "stemRms": {
+            "1": 0.10122387468396385,
+            "2": 0,
+            "3": 0.02400200606462547,
+            "4": 0.006481674730499575
+          },
+          "sendReturnRms": 0.05094401153861693,
+          "otherBusInSendWindow": 0,
+          "duckDb": 33.48997647742678
+        },
+        "headline": "33.5 dB duck live; offline 4 buses, 33.5 dB duck"
       },
       "notes": {
         "engine": "superdough",
         "scope": "live playback in headless Chromium with a fake audio device; ducking only, buses and sends are not separately observable in a stereo mix",
         "tap": "AudioWorklet recorder on getSuperdoughAudioController().output.destinationGain (master mix, channel 0); median drop over orbit-2 trigger starts; tempo via setcps(1) in the REPL code",
-        "offlineExport": "renderPatternAudio renders in 1-cycle chunks and superdough fires duck() from a main-thread webAudioTimeout callback, so in an export the duck lands wherever the main thread catches up (at chunk boundaries, or past the render) instead of at the trigger; offlineDropDb therefore varies from run to run",
-        "reason": "partial: ducking verified; 4 buses + send not verified by this probe"
+        "offline": "renderPatternStems of mixPattern(): buses are orbits, the send is a delay on orbit 3, the sidechain is duckorbit from orbit 2 to orbit 1"
       },
       "run": {
-        "ranAt": "2026-10-02T04:44:09.852Z",
-        "commit": "3dc3478e",
+        "ranAt": "2026-10-02T10:27:25.161Z",
+        "commit": "a116a81d",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
         "platform": "linux-x64",
-        "distBuiltAt": "2026-10-02T04:40:23.319Z",
+        "distBuiltAt": "2026-10-02T10:27:20.448Z",
         "thresholds": {
           "minDuckDb": 6
         }
@@ -279,27 +294,27 @@
         ],
         "stemRms": {
           "1": 0.039059157460414114,
-          "2": 0.023485790950481162,
+          "2": 0.023485790949179956,
           "3": 0.027811885883111807,
           "4": 0.01560795278054175
         },
-        "residualDbfs": -154.5973974851091,
+        "residualDbfs": -156.53559774527022,
         "lengthSamples": 96000,
         "referenceLength": 96000,
-        "headline": "4 stems, residual -154.6 dBFS"
+        "headline": "4 stems, residual -156.5 dBFS"
       },
       "notes": {
         "reference": "renderPatternAudio stereo render of the same pattern",
         "scope": "left channels compared"
       },
       "run": {
-        "ranAt": "2026-10-02T04:44:00.712Z",
-        "commit": "3dc3478e",
+        "ranAt": "2026-10-02T10:26:19.407Z",
+        "commit": "a116a81d",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
         "platform": "linux-x64",
-        "distBuiltAt": "2026-10-02T04:40:23.319Z",
+        "distBuiltAt": "2026-10-02T10:26:13.683Z",
         "thresholds": {
           "maxResidualDbfs": -60
         }

@@ -1,12 +1,14 @@
-// MIX-1 (browser): during LIVE playback, a trigger on orbit 2 ducks orbit 1 by at least minDuckDb
-// (superdough duckorbit). The master mix is recorded sample-accurately with an AudioWorklet tap;
-// the drop is measured around each orbit-2 oscillator start and the median is reported. The
-// offline export (renderPatternAudio) is measured too, as an extra export-fidelity metric.
+// MIX-1 (browser): two checks, both required.
+// Live: during playback, a trigger on orbit 2 ducks orbit 1 by at least minDuckDb (superdough
+// duckorbit). The master mix is recorded sample-accurately with an AudioWorklet tap; the drop is
+// measured around each orbit-2 oscillator start and the median is reported.
+// Offline: mixPattern() rendered as stems (renderPatternStems) shows four buses, a delay send that
+// returns on its own bus, and the duck on the mix (judgeMix).
 import { recordLive } from '../../lib/browser/page-recorder.mjs';
-import { renderInPage } from '../../lib/browser/page-render.mjs';
+import { renderStemsInPage } from '../../lib/browser/page-render.mjs';
 import { withMiniStrings } from '../../lib/browser/page-scope.mjs';
-import { duckDrop, duckDropAt } from '../../lib/checks.mjs';
-import { DUCK, duckPattern } from '../../lib/patterns.mjs';
+import { duckDropAt, judgeMix } from '../../lib/checks.mjs';
+import { DUCK, MIX, duckPattern, mixPattern } from '../../lib/patterns.mjs';
 
 const RECORD_SECONDS = 3;
 const TRIGGER_FREQ = 440 * Math.pow(2, (72 - 69) / 12); // duckPattern's orbit-2 trigger is note 72
@@ -32,9 +34,9 @@ export async function probe({ page, thresholds }) {
   const dropDb = drops.length ? median(drops.map((d) => d.dropDb)) : NaN;
   const beforeRms = drops.length ? median(drops.map((d) => d.beforeRms)) : 0;
 
-  // Offline export (renderPatternAudio) for comparison: it closes the live context, so it runs last.
-  const offline = await renderInPage(page, duckPattern, { cps: DUCK.cps, cycles: 1 });
-  const offlineDropDb = duckDrop(offline.left, offline.sampleRate, DUCK).dropDb;
+  // Offline stems: rendering closes the live context, so it runs last.
+  const stems = await renderStemsInPage(page, mixPattern, { cps: MIX.cps, cycles: MIX.cycles });
+  const offline = stems ? judgeMix(stems, MIX, thresholds) : { status: 'fail', metrics: {}, problems: ['no renderPatternStems in the page'] };
 
   const metrics = {
     triggers: drops.length,
@@ -43,21 +45,22 @@ export async function probe({ page, thresholds }) {
     beforeRms,
     recordedSamples: left.length,
     sampleRate,
-    offlineDropDb,
-    headline: Number.isFinite(dropDb) ? `${dropDb.toFixed(1)} dB duck (live)` : 'no trigger',
+    offline: offline.metrics,
+    headline: Number.isFinite(dropDb)
+      ? `${dropDb.toFixed(1)} dB duck live; offline ${offline.metrics.orbits?.length ?? 0} buses, ${offline.metrics.duckDb?.toFixed(1)} dB duck`
+      : 'no trigger',
   };
   const notes = {
     engine: 'superdough',
     scope: 'live playback in headless Chromium with a fake audio device; ducking only, buses and sends are not separately observable in a stereo mix',
     tap: `AudioWorklet recorder on ${live.tap} (master mix, channel 0); median drop over orbit-2 trigger starts; tempo via setcps(${DUCK.cps}) in the REPL code`,
-    offlineExport:
-      'renderPatternAudio renders in 1-cycle chunks and superdough fires duck() from a main-thread webAudioTimeout callback, so in an export the duck lands wherever the main thread catches up (at chunk boundaries, or past the render) instead of at the trigger; offlineDropDb therefore varies from run to run',
+    offline: 'renderPatternStems of mixPattern(): buses are orbits, the send is a delay on orbit 3, the sidechain is duckorbit from orbit 2 to orbit 1',
   };
   if (live.error) return { status: 'fail', metrics, notes: { ...notes, error: live.error } };
   if (!drops.length) return { status: 'fail', metrics, notes: { ...notes, error: 'no orbit-2 trigger starts recorded inside the capture' } };
   if (!(beforeRms > 0)) return { status: 'fail', metrics, notes: { ...notes, error: 'no signal before the trigger' } };
   if (thresholds.minDuckDb == null) return { status: 'fail', metrics, notes: { ...notes, error: 'threshold minDuckDb missing' } };
-  if (!(dropDb >= thresholds.minDuckDb)) return { status: 'fail', metrics, notes: { ...notes, error: `ducking ${dropDb.toFixed(2)} dB < ${thresholds.minDuckDb} dB` } };
-  // Ducking alone doesn't certify the full MIX-1 criterion (4 buses, one send, one ducked bus).
-  return { status: 'not-run', metrics, notes: { ...notes, reason: 'partial: ducking verified; 4 buses + send not verified by this probe' } };
+  if (!(dropDb >= thresholds.minDuckDb)) return { status: 'fail', metrics, notes: { ...notes, error: `live ducking ${dropDb.toFixed(2)} dB < ${thresholds.minDuckDb} dB` } };
+  if (offline.status !== 'pass') return { status: 'fail', metrics, notes: { ...notes, error: `offline: ${offline.problems.join('; ')}` } };
+  return { status: 'pass', metrics, notes };
 }

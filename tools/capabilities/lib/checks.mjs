@@ -125,6 +125,29 @@ export function stemResidual(mix, stems) {
   return { residualDbfs: toDb(worst) };
 }
 
+// MIX-1 verdict on a stem render of mixPattern(): `stems` maps orbit -> left-channel samples, `mix` is
+// the left channel of the master output. Checks the four buses (one stem per orbit, the audible
+// ones non-silent), the send (orbit 3's delay returns on orbit 3 once its note has ended, while
+// orbit 4, whose note has ended too, is silent) and the duck (measured on the mix).
+export function judgeMix({ stems, mix, sampleRate }, shape, thresholds) {
+  const [from, to] = shape.sendWindow.map((t) => Math.round(t * sampleRate));
+  const orbits = [...stems.keys()].sort((a, b) => a - b);
+  const stemRms = Object.fromEntries(orbits.map((o) => [o, windowRms(stems.get(o), 0, stems.get(o).length)]));
+  const sendReturnRms = stems.has(shape.send) ? windowRms(stems.get(shape.send), from, to) : 0;
+  const otherBusInSendWindow = stems.has(4) ? windowRms(stems.get(4), from, to) : NaN;
+  const duck = duckDrop(mix, sampleRate, { triggerAt: shape.duckAt });
+  const metrics = { orbits, stemRms, sendReturnRms, otherBusInSendWindow, duckDb: duck.dropDb };
+  const problems = [];
+  if (String(orbits) !== String(shape.orbits)) problems.push(`buses ${orbits}, expected ${shape.orbits}`);
+  const silent = [1, 3, 4].filter((o) => !(stemRms[o] > 1e-4));
+  if (silent.length) problems.push(`silent buses: ${silent}`);
+  if (!(sendReturnRms > 1e-3)) problems.push(`no delay return on bus ${shape.send} after its note (rms ${sendReturnRms})`);
+  if (!(otherBusInSendWindow < 1e-4)) problems.push(`bus 4 not silent in the send window (rms ${otherBusInSendWindow})`);
+  if (thresholds?.minDuckDb == null) problems.push('threshold minDuckDb missing');
+  else if (!(duck.dropDb >= thresholds.minDuckDb)) problems.push(`ducking ${duck.dropDb.toFixed(2)} dB < ${thresholds.minDuckDb} dB`);
+  return { status: problems.length ? 'fail' : 'pass', metrics, problems };
+}
+
 // EXP-2: does an exported name look like a stem API? Matches 'stem'/'stems' as a word of the
 // camelCase- or snake_case-split name ('renderStems', 'STEM_EXPORT'), not as a substring of
 // another word ('system', 'ecosystem', 'stemmer').

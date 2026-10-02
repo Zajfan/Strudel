@@ -51,22 +51,35 @@
       }
     },
     "MIX-1": {
-      "status": "fail",
+      "status": "pass",
       "metrics": {
-        "events": 2,
-        "beforeRms": 0.03585480478041702,
-        "afterRms": 0.03501576069556056,
-        "dropDb": 0.20567593333092768,
-        "headline": "0.2 dB duck"
+        "events": 4,
+        "orbits": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "stemRms": {
+          "1": 0.03374169340231597,
+          "2": 0,
+          "3": 0.005787515343304319,
+          "4": 0.0005034824551752867
+        },
+        "sendReturnRms": 0.010767939008727717,
+        "otherBusInSendWindow": 0,
+        "duckDb": 33.4816388837026,
+        "headline": "4 buses, send return 0.011 rms, 33.5 dB duck"
       },
       "notes": {
         "engine": "supradough",
-        "scope": "ducking only; buses and sends are not separately observable in a stereo mix",
-        "error": "ducking 0.21 dB < 6 dB"
+        "buses": "orbits",
+        "send": "delay on orbit 3",
+        "sidechain": "duckorbit from orbit 2 to orbit 1"
       },
       "run": {
-        "ranAt": "2026-09-29T12:17:18.424Z",
-        "commit": "96df6ef6",
+        "ranAt": "2026-10-02T10:25:16.017Z",
+        "commit": "a116a81d",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
@@ -260,14 +273,14 @@
       "metrics": {
         "events": 1115,
         "audioSeconds": 65,
-        "renderSeconds": 15.405560933999999,
-        "realtimeFactor": 4.219255649208158,
+        "renderSeconds": 15.403248288999999,
+        "realtimeFactor": 4.219889128607943,
         "headline": "4.2x real time"
       },
       "notes": {},
       "run": {
-        "ranAt": "2026-10-02T04:39:05.857Z",
-        "commit": "3dc3478e",
+        "ranAt": "2026-10-02T10:28:05.813Z",
+        "commit": "a116a81d",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
