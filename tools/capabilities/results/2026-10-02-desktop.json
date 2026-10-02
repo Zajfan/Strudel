@@ -61,26 +61,26 @@
         "triggers": 3,
         "drops": [
           {
-            "atSample": 16514,
-            "beforeRms": 0.10756160376189207,
-            "afterRms": 0.0022757323761763344,
-            "dropDb": 33.490721617401235
+            "atSample": 16515,
+            "beforeRms": 0.10756361523536243,
+            "afterRms": 0.0022757714258082053,
+            "dropDb": 33.4907350065915
           },
           {
-            "atSample": 60614,
-            "beforeRms": 0.10756160376189207,
-            "afterRms": 0.00227611497319114,
-            "dropDb": 33.489261464984324
+            "atSample": 60615,
+            "beforeRms": 0.10756361523536243,
+            "afterRms": 0.002276151720092496,
+            "dropDb": 33.48928366653801
           },
           {
-            "atSample": 104714,
-            "beforeRms": 0.10756160376189207,
-            "afterRms": 0.002274990304074393,
-            "dropDb": 33.49355437909249
+            "atSample": 104715,
+            "beforeRms": 0.10756361523536243,
+            "afterRms": 0.0022750308053525225,
+            "dropDb": 33.49356217739426
           }
         ],
-        "dropDb": 33.490721617401235,
-        "beforeRms": 0.10756160376189207,
+        "dropDb": 33.4907350065915,
+        "beforeRms": 0.10756361523536243,
         "recordedSamples": 134272,
         "sampleRate": 44100,
         "offline": {
@@ -109,8 +109,8 @@
         "offline": "renderPatternStems of mixPattern(): buses are orbits, the send is a delay on orbit 3, the sidechain is duckorbit from orbit 2 to orbit 1"
       },
       "run": {
-        "ranAt": "2026-10-02T11:43:57.174Z",
-        "commit": "54d20dc7",
+        "ranAt": "2026-10-02T21:12:43.312Z",
+        "commit": "c414ec1e",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
@@ -235,15 +235,15 @@
       "status": "pass",
       "metrics": {
         "events": 1115,
-        "rms": 0.106747321546525,
+        "rms": 0.10662654996147736,
         "lengthSamples": 3072000,
         "expectedLength": 3072000,
         "secondLength": 3072000,
         "hashes": [
-          "3bdb4159",
-          "9e810fb1"
+          "89f3d264",
+          "37672062"
         ],
-        "firstDifferenceLeft": 7171,
+        "firstDifferenceLeft": 7169,
         "channels": 2,
         "wav": {
           "format": 1,
@@ -254,7 +254,7 @@
           "frames": 3072000,
           "fileBytes": 12288044
         },
-        "maxDiffDbfs": -81.54705576283524,
+        "maxDiffDbfs": -81.54550926774738,
         "headline": "64 s WAV, repeatable within -81.5 dBFS"
       },
       "notes": {
@@ -262,8 +262,8 @@
         "scope": "left channel hashed; render has no tail"
       },
       "run": {
-        "ranAt": "2026-10-02T11:43:57.174Z",
-        "commit": "54d20dc7",
+        "ranAt": "2026-10-02T21:12:36.060Z",
+        "commit": "c414ec1e",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
@@ -289,22 +289,22 @@
         ],
         "stemRms": {
           "1": 0.03905915815210178,
-          "2": 0.02348579076110855,
+          "2": 0.023485790762043483,
           "3": 0.02781188544674936,
           "4": 0.015607953608395609
         },
-        "residualDbfs": -154.5973974851091,
+        "residualDbfs": -151.99072211520897,
         "lengthSamples": 96000,
         "referenceLength": 96000,
-        "headline": "4 stems, residual -154.6 dBFS"
+        "headline": "4 stems, residual -152.0 dBFS"
       },
       "notes": {
         "reference": "renderPatternAudio stereo render of the same pattern",
         "scope": "left channels compared"
       },
       "run": {
-        "ranAt": "2026-10-02T11:43:57.174Z",
-        "commit": "54d20dc7",
+        "ranAt": "2026-10-02T21:12:38.236Z",
+        "commit": "c414ec1e",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
@@ -468,15 +468,15 @@
         "pluginNotes": 4,
         "referenceNotes": 4,
         "syncOffsetsMs": [
-          1.27,
           1.18,
-          0.07,
-          0.57
+          0,
+          0.63,
+          -0.07
         ],
-        "maxSyncOffsetMs": 1.2698412698412698,
-        "pluginRms": 0.0404965488167485,
-        "masterRms": 0.05055946975069885,
-        "reverbTailGainDb": 96.34635863846049,
+        "maxSyncOffsetMs": 1.179138321995465,
+        "pluginRms": 0.04053204808172475,
+        "masterRms": 0.053690031526102695,
+        "reverbTailGainDb": 94.8839192200698,
         "automatableParams": 598,
         "gui": {
           "width": 1141,
@@ -484,16 +484,33 @@
           "colours": 5071,
           "closed": true
         },
-        "automationDropDb": 157.1471252533491,
+        "automationDropDb": 153.73049246734618,
+        "export": {
+          "orbits": [
+            1,
+            2
+          ],
+          "pluginStemNotes": 6,
+          "offsetsMs": [
+            3.4,
+            1.25,
+            1.58,
+            0.96,
+            1.67,
+            1.58
+          ],
+          "sineStemRms": 0.031134120806411116,
+          "sineStemLeakRms": 0
+        },
         "native": {
           "notes": 13,
           "lateNotes": 0,
           "device": "strudel_null",
-          "rms": 0.10064076216260362,
+          "rms": 0.10065606255241805,
           "paramChanges": 429,
           "loadedAfterUnload": []
         },
-        "headline": "Surge XT in the mixer: within 1.3 ms of the beat, room +96.3 dB, automation -157 dB, GUI 1141x711; native: 13 notes"
+        "headline": "Surge XT in the mixer: within 1.2 ms of the beat, room +94.9 dB, automation -154 dB, GUI 1141x711, export 6 notes within 3.4 ms; native: 13 notes"
       },
       "notes": {
         "plugin": "Surge XT",
@@ -501,8 +518,8 @@
         "native": "setcps(1)\nnote(\"c4 e4 g4 c5\").clap('Surge XT', { output: 'native' })"
       },
       "run": {
-        "ranAt": "2026-10-02T20:57:54.361Z",
-        "commit": "cec03791",
+        "ranAt": "2026-10-02T21:11:47.094Z",
+        "commit": "c414ec1e",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",

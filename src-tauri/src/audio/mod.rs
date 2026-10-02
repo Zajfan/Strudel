@@ -111,6 +111,17 @@ pub fn mix_load(plugin: String, sample_rate: f64, mixer: State<'_, MixerEngine>)
   mixer.load(&plugin, sample_rate)
 }
 
+// a separate instance of a plugin, for an export (offline render); unloaded with mix_unload
+#[tauri::command]
+pub fn mix_load_instance(plugin: String, sample_rate: f64, mixer: State<'_, MixerEngine>) -> Result<usize, String> {
+  mixer.load_instance(&plugin, sample_rate)
+}
+
+#[tauri::command]
+pub fn mix_unload(plugin: usize, mixer: State<'_, MixerEngine>) -> Result<(), String> {
+  mixer.unload_index(plugin)
+}
+
 #[tauri::command]
 pub fn mix_notes(plugin: usize, notes: Vec<MixNote>, mixer: State<'_, MixerEngine>) -> Result<(), String> {
   mixer.notes(plugin, notes)

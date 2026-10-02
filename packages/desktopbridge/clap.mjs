@@ -4,7 +4,7 @@
 // /usr/lib64/clap, and loaded on first use. A stand-in for the VersaTone engine
 // (docs/superpowers/plans/2026-10-02-native-desktop-audio.md).
 import { Pattern, logger, noteToMidi } from '@strudel/core';
-import { getAudioContext, getExternalChannel } from '@strudel/webaudio';
+import { getAudioContext, getExternalChannel, registerOfflineRenderer } from '@strudel/webaudio';
 import { Invoke, toEpochMs } from './utils.mjs';
 
 // ------------------------------------------------------------------ in the page's mixer (default)
@@ -120,21 +120,80 @@ function paramChanges(value, params, time, duration) {
   return changes;
 }
 
+// sends a hap's note and parameter changes to a plugin in the mixer engine, `time` in seconds
+async function sendToMixer({ index, params }, value, time, duration) {
+  const { note, velocity = 0.9 } = value;
+  const changes = paramChanges(value, params, time, duration);
+  if (changes.length) await Invoke('mix_params', { plugin: index, params: changes });
+  if (note == null) return;
+  const notes = [{ time, duration, key: toKey(note), velocity: Math.min(1, velocity) }];
+  await Invoke('mix_notes', { plugin: index, notes });
+}
+
 function playInMixer(plugin, hap, cps, targetTime) {
-  const { note, velocity = 0.9 } = hap.value;
   // the channel takes the orbit-level controls (gain, pan, orbit, delay, room, cue) from this time
   getExternalChannel(`clap:${plugin}`).update(hap.value, targetTime, cps);
   const duration = hap.duration.valueOf() / cps;
   getStream(plugin)
-    .ready.then(async ({ index, params }) => {
-      const changes = paramChanges(hap.value, params, targetTime, duration);
-      if (changes.length) await Invoke('mix_params', { plugin: index, params: changes });
-      if (note == null) return;
-      const notes = [{ time: targetTime, duration, key: toKey(note), velocity: Math.min(1, velocity) }];
-      await Invoke('mix_notes', { plugin: index, notes });
-    })
+    .ready.then((stream) => sendToMixer(stream, hap.value, targetTime, duration))
     .catch((err) => logger(`[clap] ${plugin}: ${err}`, 'error'));
 }
+
+// Exports (offline renders): each plugin gets an instance of its own at the export's sample rate, gets
+// the notes as the render schedules them, and renders each chunk's audio, which plays through the
+// plugin's channel like the live stream does (with either output: an export has one output).
+registerOfflineRenderer('clap', {
+  start(audioContext) {
+    const sampleRate = audioContext.sampleRate;
+    // per plugin: Promise<{ index, params }>
+    const instances = new Map();
+    const instance = (plugin) => {
+      if (!instances.has(plugin)) {
+        instances.set(
+          plugin,
+          (async () => {
+            const index = await Invoke('mix_load_instance', { plugin, sampleRate });
+            const params = new Map((await Invoke('mix_param_list', { plugin: index })).map((p) => [p.name.toLowerCase(), p]));
+            return { index, params };
+          })(),
+        );
+      }
+      return instances.get(plugin);
+    };
+    return {
+      async trigger(hap, t, duration, cps) {
+        const { clapPlugin: plugin } = hap.context;
+        hap.ensureObjectValue();
+        getExternalChannel(`clap:${plugin}`).update(hap.value, t, cps);
+        await sendToMixer(await instance(plugin), hap.value, t, duration);
+      },
+      async render(from, to) {
+        const start = Math.round(from * sampleRate);
+        const frames = Math.round(to * sampleRate) - start;
+        if (frames <= 0) return;
+        for (const [plugin, loading] of instances) {
+          const { index } = await loading;
+          const samples = new Float32Array(await Invoke('mix_render', { plugin: index, start, frames }));
+          const buffer = new AudioBuffer({ numberOfChannels: 2, length: frames, sampleRate });
+          const [left, right] = [buffer.getChannelData(0), buffer.getChannelData(1)];
+          for (let i = 0; i < frames; i++) {
+            left[i] = samples[i * 2];
+            right[i] = samples[i * 2 + 1];
+          }
+          const source = new AudioBufferSourceNode(audioContext, { buffer });
+          source.connect(getExternalChannel(`clap:${plugin}`).input);
+          source.start(start / sampleRate);
+        }
+      },
+      async end() {
+        for (const loading of instances.values()) {
+          const { index } = await loading.catch(() => ({}));
+          if (index != null) await Invoke('mix_unload', { plugin: index });
+        }
+      },
+    };
+  },
+});
 
 // ------------------------------------------------------------------ on a native output
 // Lower latency, but outside the page's mixer: no Strudel effects, and only approximately in time
@@ -173,7 +232,8 @@ function playNative(plugin, hap, currentTime, cps, targetTime) {
  * automated with `auto`, by name (clapParams lists them), in their own value range:
  *   note("c2").clap('Surge XT').auto(sine.range(0, 1).slow(4), { c: 'Global Volume' }) `{ output: 'native' }`
  * plays it on the plugin output device instead (lower latency, no Strudel effects; `auto` works too).
- * Uses note and velocity (0-1, default 0.9) per note, and each note's duration.
+ * Uses note and velocity (0-1, default 0.9) per note, and each note's duration. Exports (WAV and
+ * stems) include the plugin, through Strudel's mixer with either output.
  * @name clap
  * @param {string} plugin the plugin's file name without .clap, e.g. 'Surge XT'
  * @param {Object} [options]
@@ -181,7 +241,8 @@ function playNative(plugin, hap, currentTime, cps, targetTime) {
  * @param {boolean} [options.gui] open the plugin's own window once it has loaded (see clapGui)
  */
 Pattern.prototype.clap = function (plugin, { output = 'mixer', gui = false } = {}) {
-  return this.onTrigger((hap, currentTime, cps, targetTime) => {
+  const pattern = this.withHap((hap) => hap.setContext({ ...hap.context, offlineRenderer: 'clap', clapPlugin: plugin }));
+  return pattern.onTrigger((hap, currentTime, cps, targetTime) => {
     hap.ensureObjectValue();
     if (gui && !guiOpened.has(plugin)) {
       guiOpened.add(plugin);

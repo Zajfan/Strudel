@@ -54,6 +54,17 @@ export async function renderPatternAudio(
   downloadBlob(new Blob([audioBufferToWav(renderedBuffer)], { type: 'audio/wav' }), `${downloadName || defaultName()}.wav`);
 }
 
+// Offline renderers: sources outside superdough that render their own audio for exports, such as the
+// desktop app's CLAP plugins. A hap whose context names one (`context.offlineRenderer`) is handed to it
+// instead of superdough. A renderer is `{ start(audioContext) }`, returning a session for one render:
+//   trigger(hap, t, duration, cps): a hap at t seconds (in the order superdough gets them);
+//   render(from, to): the haps up to `to` are triggered, schedule the audio for [from, to) seconds;
+//   end(): the render is over (also after a failed render).
+const offlineRenderers = new Map();
+export function registerOfflineRenderer(name, renderer) {
+  offlineRenderers.set(name, renderer);
+}
+
 // Renders [begin, end) cycles of the pattern offline and returns the AudioBuffer. `channels` is the
 // number of output channels; with multiChannelOrbits, orbit n plays on channels 2n-1 and 2n (1-based).
 async function renderOffline(pattern, cps, begin, end, sampleRate, maxPolyphony, multiChannelOrbits, channels = 2) {
@@ -62,18 +73,30 @@ async function renderOffline(pattern, cps, begin, end, sampleRate, maxPolyphony,
   audioContext = new OfflineAudioContext(channels, ((end - begin) / cps) * sampleRate, sampleRate);
   setAudioContext(audioContext);
   setSuperdoughAudioController(new SuperdoughAudioController(audioContext));
+  const sessions = new Map();
   try {
     await initAudio({
       maxPolyphony,
       multiChannelOrbits,
     });
+    for (const [name, renderer] of offlineRenderers) {
+      sessions.set(name, await renderer.start(audioContext));
+    }
+    const render = { pattern, cps, begin, sessions };
 
     // Firefox currently doesn't support suspending an OfflineAudioContext,
     // so no chunked rendering. Bad performance, but at least it works.
     return await (audioContext.suspend === undefined
-      ? renderPatternAudioWhole(audioContext, pattern, cps, begin, end)
-      : renderPatternAudioInChunks(audioContext, pattern, cps, begin, end, 1));
+      ? renderPatternAudioWhole(audioContext, render, end)
+      : renderPatternAudioInChunks(audioContext, render, end, 1));
   } finally {
+    for (const session of sessions.values()) {
+      try {
+        await session.end();
+      } catch (err) {
+        errorLogger(err, 'webaudio');
+      }
+    }
     setAudioContext(null);
     setSuperdoughAudioController(null);
     resetGlobalEffects();
@@ -158,17 +181,18 @@ function downloadBlob(blob, filename) {
   URL.revokeObjectURL(url);
 }
 
-async function renderPatternAudioWhole(audioContext, pattern, cps, begin, end) {
+async function renderPatternAudioWhole(audioContext, render, end) {
   logger(`[webaudio] preloading`);
 
-  await scheduleHapsChunk(pattern, cps, begin, begin, end);
+  await scheduleHapsChunk(render, render.begin, end);
 
   logger('[webaudio] start rendering');
 
   return audioContext.startRendering();
 }
 
-async function renderPatternAudioInChunks(audioContext, pattern, cps, begin, end, chunkSizeInCycles) {
+async function renderPatternAudioInChunks(audioContext, render, end, chunkSizeInCycles) {
+  const { begin, cps } = render;
   let currentCycle = begin;
   let renderPromise = null;
 
@@ -180,7 +204,7 @@ async function renderPatternAudioInChunks(audioContext, pattern, cps, begin, end
 
     logger(`[webaudio] preloading cycles ${chunkStart} - ${chunkEnd}`);
 
-    await scheduleHapsChunk(pattern, cps, begin, chunkStart, chunkEnd);
+    await scheduleHapsChunk(render, chunkStart, chunkEnd);
 
     logger(`[webaudio] rendering cycles ${chunkStart} - ${chunkEnd}`);
 
@@ -212,7 +236,7 @@ async function renderPatternAudioInChunks(audioContext, pattern, cps, begin, end
   return renderPromise;
 }
 
-async function scheduleHapsChunk(pattern, cps, begin, chunkStart, chunkEnd) {
+async function scheduleHapsChunk({ pattern, cps, begin, sessions }, chunkStart, chunkEnd) {
   // Calling superdough(...) in ascending onset time order is important
   // for controls that depend on the audio graph state like `cut`
   let haps = pattern
@@ -221,17 +245,25 @@ async function scheduleHapsChunk(pattern, cps, begin, chunkStart, chunkEnd) {
 
   for (const hap of haps) {
     if (hap.hasOnset()) {
+      const t = (hap.whole.begin.valueOf() - begin) / cps;
       try {
-        await superdough(
-          hap2value(hap),
-          (hap.whole.begin.valueOf() - begin) / cps,
-          hap.duration / cps,
-          cps,
-          (hap.whole?.begin.valueOf() - begin) / cps,
-        );
+        const session = sessions.get(hap.context.offlineRenderer);
+        if (session) {
+          await session.trigger(hap, t, hap.duration / cps, cps);
+        } else {
+          await superdough(hap2value(hap), t, hap.duration / cps, cps, t);
+        }
       } catch (err) {
         errorLogger(err, 'webaudio');
       }
+    }
+  }
+  // the other renderers' audio for this chunk, now that they have its haps
+  for (const session of sessions.values()) {
+    try {
+      await session.render((chunkStart - begin) / cps, (chunkEnd - begin) / cps);
+    } catch (err) {
+      errorLogger(err, 'webaudio');
     }
   }
 }

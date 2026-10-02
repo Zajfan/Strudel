@@ -54,6 +54,8 @@ fn main() {
         audio::clap_loaded,
         audio::clap_unload,
         audio::mix_load,
+        audio::mix_load_instance,
+        audio::mix_unload,
         audio::mix_notes,
         audio::mix_render,
         audio::mix_param_list,

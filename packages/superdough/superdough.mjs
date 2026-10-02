@@ -393,7 +393,9 @@ export function getExternalChannel(key) {
         delaySend?.disconnect();
         reverbSend?.disconnect();
         delaySend = reverbSend = undefined;
-        orbitBus = controller.getOrbit(orbit, mapChannelNumbers(getDefaultValue('channels')), cue);
+        // as for superdough's voices: with multiChannelOrbits (stem renders) each orbit has its own pair
+        const channels = multiChannelOrbits && orbit > 0 ? [orbit * 2 - 1, orbit * 2] : getDefaultValue('channels');
+        orbitBus = controller.getOrbit(orbit, mapChannelNumbers(channels), cue);
         orbitBus.connectToOutput(post);
         routeKey = nextRoute;
       }

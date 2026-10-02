@@ -10,9 +10,12 @@
 //    silent device; checked through engine_capture and engine_stats, and unloading.
 // 4. The plugin's GUI: clapGui opens it in its own window (on the app's Xvfb display), which must
 //    show something (not one flat colour), and closes it again.
+// 5. Exports: an offline stem render of a pattern with the plugin on orbit 2 and a sine on orbit 1.
+//    The plugin's stem must hold its notes, each within MAX_EXPORT_MS of its time, and only its stem.
 // Without Surge XT in a CLAP folder this is not-run (see the follow-ups doc for installing it).
 
 import { execFileSync } from 'node:child_process';
+import { renderStemsInPage } from '../../lib/browser/page-render.mjs';
 
 export const usesPage = true;
 
@@ -20,6 +23,9 @@ const PLUGIN = 'Surge XT';
 const SECONDS = 4;
 const MAX_SYNC_MS = 3;
 const REFERENCE_ORBIT = 3;
+// Surge XT's onsets spread more at 48 kHz (up to ~2 ms late in the Rust tests) and a fresh instance's
+// first note a little more; a broken export is off by far more (a chunk, a sample-rate mismatch)
+const MAX_EXPORT_MS = 5;
 const mixerCode = (room) =>
   `setcps(1)\n$: note("c4 ~ ~ ~").clap('${PLUGIN}').room(${room})\n` +
   `$: note("c6 ~ ~ ~").s("sine").gain(0.3).release(0.05).orbit(${REFERENCE_ORBIT})`;
@@ -213,6 +219,27 @@ export async function probe({ page, thresholds }) {
   await new Promise((r) => setTimeout(r, 500));
   const guiClosed = !windows().includes(`"${guiTitle}"`);
 
+  // 5. exports: the plugin in a stem render (cps 1: notes at 0 and 0.5 s of each cycle, with rests between)
+  const exportCycles = 3;
+  let exported;
+  try {
+    exported = await renderStemsInPage(
+      page,
+      () => stack(note("c4 ~ e4 ~").clap('Surge XT').orbit(2), note("c6").s('sine').decay(0.1).sustain(0).orbit(1)),
+      { cps: 1, cycles: exportCycles, sampleRate: 48000 },
+    );
+  } catch (err) {
+    exported = { error: String(err?.message ?? err) };
+  }
+  const exportExpected = Array.from({ length: exportCycles * 2 }, (_, k) => k * 0.5 * 48000);
+  const exportStem = exported?.stems?.get(2);
+  const exportOnsets = exportStem ? onsets(exportStem, 0.05 * peak(exportStem), 0.1 * 48000) : [];
+  const exportOffsetsMs = exportExpected.map((at) => {
+    const near = exportOnsets.reduce((best, o) => (Math.abs(o - at) < Math.abs(best - at) ? o : best), Infinity);
+    return ((near - at) / 48000) * 1000;
+  });
+  const exportMaxMs = Math.max(...exportOffsetsMs.map(Math.abs));
+
   // 3. on a native output
   const native = await page.evaluate(playNative, { code: NATIVE_CODE, seconds: 3, plugin: PLUGIN, unload: false }, { timeoutMs: 120000 });
   // automation on the native output: the engine applies the parameter changes (counted). (Their
@@ -230,6 +257,16 @@ export async function probe({ page, thresholds }) {
     automatableParams: paramNames.length,
     gui: { error: guiOpen.error, width: guiWidth, height: guiHeight, colours: guiColours, closed: guiClosed },
     automationDropDb,
+    export: exported?.error
+      ? { error: exported.error }
+      : {
+          orbits: exported ? [...exported.stems.keys()] : null,
+          pluginStemNotes: exportOnsets.length,
+          offsetsMs: exportOffsetsMs.map((d) => +d.toFixed(2)),
+          sineStemRms: exported?.stems?.get(1) ? rmsOf(exported.stems.get(1), 0, exported.stems.get(1).length) : null,
+          // where only the plugin sounds (its second note; the sine has decayed)
+          sineStemLeakRms: exported?.stems?.get(1) ? rmsOf(exported.stems.get(1), 26400, 33600) : null,
+        },
     native: native.error
       ? { error: native.error }
       : {
@@ -240,7 +277,7 @@ export async function probe({ page, thresholds }) {
           paramChanges: muted.stats?.paramChanges,
           loadedAfterUnload: muted.loadedAfterUnload,
         },
-    headline: `${PLUGIN} in the mixer: within ${maxOffsetMs.toFixed(1)} ms of the beat, room +${tailGainDb.toFixed(1)} dB, automation -${automationDropDb.toFixed(0)} dB, GUI ${guiWidth}x${guiHeight}; native: ${native.stats?.notes ?? 0} notes`,
+    headline: `${PLUGIN} in the mixer: within ${maxOffsetMs.toFixed(1)} ms of the beat, room +${tailGainDb.toFixed(1)} dB, automation -${automationDropDb.toFixed(0)} dB, GUI ${guiWidth}x${guiHeight}, export ${exportOnsets.length} notes within ${exportMaxMs.toFixed(1)} ms; native: ${native.stats?.notes ?? 0} notes`,
   };
   const fail = (error) => ({ status: 'fail', metrics, notes: { ...notes, error } });
   if (!(pluginOnsets.length >= SECONDS - 1)) return fail(`${pluginOnsets.length} plugin notes recorded on its channel`);
@@ -256,6 +293,12 @@ export async function probe({ page, thresholds }) {
   if (!(guiWidth > 100 && guiHeight > 100)) return fail(`no "${guiTitle}" window of a usable size (${guiWidth}x${guiHeight})`);
   if (!(guiColours > 50)) return fail(`the GUI window shows ${guiColours} colours: not drawn`);
   if (!guiClosed) return fail('the GUI window was still open after clapGui(name, false)');
+  if (!exported || exported.error) return fail(`export: ${exported?.error ?? 'no renderPatternStems in the page'}`);
+  if (!exportStem) return fail(`export: no stem for the plugin's orbit 2 (stems: ${[...exported.stems.keys()]})`);
+  if (exportOnsets.length !== exportExpected.length) return fail(`export: ${exportOnsets.length} plugin notes in its stem, expected ${exportExpected.length}`);
+  if (!(exportMaxMs <= MAX_EXPORT_MS)) return fail(`export: plugin notes off their times by up to ${exportMaxMs.toFixed(2)} ms`);
+  if (!(metrics.export.sineStemRms >= thresholds.minRms)) return fail('export: the sine stem is silent');
+  if (!(metrics.export.sineStemLeakRms < 1e-3)) return fail(`export: the plugin is in the sine's stem too (rms ${metrics.export.sineStemLeakRms})`);
   if (native.error) return fail(`native output: ${native.error}`);
   if (!(native.stats.notes >= 11) || native.stats.lateNotes > 0) return fail(`native output: ${native.stats.notes} notes, ${native.stats.lateNotes} late`);
   if (!(native.rms >= thresholds.minRms)) return fail(`native output rms ${native.rms}`);

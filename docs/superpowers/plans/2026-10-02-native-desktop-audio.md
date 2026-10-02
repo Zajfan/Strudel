@@ -53,8 +53,16 @@ WebKitGTK (the desktop webview) cannot play to a second output device (no `setSi
   placed at their exact frame. Measured: plugin notes within 1.5 ms of superdough notes scheduled at
   the same times (Surge XT's own 16-frame blocks and attack). `.clap(name, { output: 'native' })`
   keeps the native output (lower latency, no Strudel effects).
-- Per-voice controls (filters, envelopes) don't apply to a plugin stream; exports (offline renders)
-  don't include plugins yet (the player pulls asynchronously).
+- Per-voice controls (filters, envelopes) don't apply to a plugin stream.
+- Done 2026-10-02: exports include plugins. Offline renders (WAV and stems) hand haps whose context
+  names an offline renderer to it instead of superdough (`registerOfflineRenderer` in webaudio.mjs).
+  The clap renderer loads an instance of each plugin of its own at the export's sample rate
+  (`mix_load_instance`, unloaded after with `mix_unload`; the live plugins stay), sends it the notes
+  and parameter changes as the render schedules them, and after each chunk renders the chunk's frames
+  and plays them through the plugin's channel. The mixer keeps a sample rate per plugin. External
+  channels now follow multiChannelOrbits like superdough's voices, so a plugin lands in its orbit's
+  stem. Checked by desktop PLUG-1 (part 5): notes within 5 ms of their times (measured 1-3.4 ms;
+  Surge XT's onsets), nothing in other stems.
 - Done 2026-10-02: plugin parameter automation in the mixer. A plugin's automatable parameters are
   read at load (CLAP params; `clapParams(name)` lists them, Surge XT: 598), and an `.auto()` curve
   whose control names a parameter is sent as timed plain values (`mix_params`) and applied as

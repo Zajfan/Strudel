@@ -57,8 +57,10 @@ enum Command {
 
 struct Inner {
   commands: Sender<Command>,
-  sample_rate: f64,
+  // the live plugins by name (one instance each); export renders load their own instances, by index only
   plugins: HashMap<String, usize>,
+  // per plugin index: the sample rate it was loaded for (the page's, or an export's)
+  rates: HashMap<usize, f64>,
   params: HashMap<usize, Vec<ParamDesc>>,
   // per plugin index: its signal for having unloaded, and its id on the main thread
   unloaded: HashMap<usize, Receiver<()>>,
@@ -144,46 +146,62 @@ fn render_thread(commands: Receiver<Command>) {
 }
 
 impl MixerEngine {
-  // Loads a plugin for the given sample rate (the page's) and returns its index. A different rate
-  // than the loaded plugins' (a new AudioContext) reloads everything at the new rate.
+  // Loads a plugin for the given sample rate (the page's) and returns its index. If it was loaded
+  // for another rate (a new AudioContext), it is reloaded at the new one.
   pub fn load(&self, plugin: &str, sample_rate: f64) -> Result<usize, String> {
-    let mut guard = self.inner.lock().unwrap();
-    if guard.as_ref().map_or(false, |inner| inner.sample_rate != sample_rate) {
-      drop(guard);
-      self.reset();
-      guard = self.inner.lock().unwrap();
+    let loaded = {
+      let guard = self.inner.lock().unwrap();
+      guard.as_ref().and_then(|inner| inner.plugins.get(plugin).map(|&i| (i, inner.rates.get(&i) == Some(&sample_rate))))
+    };
+    match loaded {
+      Some((index, true)) => return Ok(index),
+      Some((index, false)) => {
+        self.unload_index(index)?;
+      }
+      None => {}
     }
+    let index = self.load_instance(plugin, sample_rate)?;
+    self.inner.lock().unwrap().as_mut().ok_or("no plugins loaded")?.plugins.insert(plugin.to_string(), index);
+    Ok(index)
+  }
+
+  // Loads a new instance of a plugin, apart from the live one (for an export), and returns its index.
+  pub fn load_instance(&self, plugin: &str, sample_rate: f64) -> Result<usize, String> {
+    let mut guard = self.inner.lock().unwrap();
     let inner = guard.get_or_insert_with(|| {
       let (commands, receiver) = channel();
       std::thread::spawn(move || render_thread(receiver));
       Inner {
         commands,
-        sample_rate,
         plugins: HashMap::new(),
+        rates: HashMap::new(),
         params: HashMap::new(),
         unloaded: HashMap::new(),
         host_ids: HashMap::new(),
         next_index: 0,
       }
     });
-    if let Some(&index) = inner.plugins.get(plugin) {
-      return Ok(index);
-    }
     let index = inner.next_index;
     inner.next_index += 1;
     let Loaded { slot, unloaded, id } = load_plugin(plugin, index, sample_rate)?;
     inner.host_ids.insert(index, id);
     inner.unloaded.insert(index, unloaded);
+    inner.rates.insert(index, sample_rate);
     inner.params.insert(index, slot.layout.params.clone());
     inner.commands.send(Command::Add(slot)).map_err(|e| e.to_string())?;
-    inner.plugins.insert(plugin.to_string(), index);
     Ok(index)
   }
 
-  pub fn notes(&self, plugin: usize, notes: Vec<MixNote>) -> Result<(), String> {
+  // the sample rate a loaded plugin renders at
+  fn rate(&self, plugin: usize) -> Result<(Sender<Command>, f64), String> {
     let guard = self.inner.lock().unwrap();
     let inner = guard.as_ref().ok_or("no plugins loaded")?;
-    let sr = inner.sample_rate;
+    let rate = *inner.rates.get(&plugin).ok_or("no such plugin")?;
+    Ok((inner.commands.clone(), rate))
+  }
+
+  pub fn notes(&self, plugin: usize, notes: Vec<MixNote>) -> Result<(), String> {
+    let (commands, sr) = self.rate(plugin)?;
     let mut frames = Vec::with_capacity(notes.len() * 2);
     for note in notes {
       let on = (note.time * sr).round() as i64;
@@ -191,7 +209,7 @@ impl MixerEngine {
       frames.push(FrameNote { frame: on, key: note.key, velocity: note.velocity, on: true });
       frames.push(FrameNote { frame: off.max(on + 1), key: note.key, velocity: 0.0, on: false });
     }
-    inner.commands.send(Command::Notes(plugin, frames)).map_err(|e| e.to_string())
+    commands.send(Command::Notes(plugin, frames)).map_err(|e| e.to_string())
   }
 
   // Shows or hides a loaded plugin's GUI; Ok(false) if it isn't loaded here.
@@ -223,14 +241,12 @@ impl MixerEngine {
   }
 
   pub fn params(&self, plugin: usize, params: Vec<MixParam>) -> Result<(), String> {
-    let guard = self.inner.lock().unwrap();
-    let inner = guard.as_ref().ok_or("no plugins loaded")?;
-    let sr = inner.sample_rate;
+    let (commands, sr) = self.rate(plugin)?;
     let frames = params
       .into_iter()
       .map(|p| FrameParam { frame: (p.time * sr).round() as i64, id: p.id, value: p.value })
       .collect();
-    inner.commands.send(Command::Params(plugin, frames)).map_err(|e| e.to_string())
+    commands.send(Command::Params(plugin, frames)).map_err(|e| e.to_string())
   }
 
   // Interleaved stereo little-endian f32 for frames [start, start + frames) of the page's clock.
@@ -254,34 +270,43 @@ impl MixerEngine {
     plugins.into_iter().map(|(n, _)| n.clone()).collect()
   }
 
-  // Unloads a plugin; Ok(false) if it wasn't loaded here.
+  // Unloads a live plugin; Ok(false) if it wasn't loaded here.
   pub fn unload(&self, plugin: &str) -> Result<bool, String> {
-    let unloaded = {
-      let mut guard = self.inner.lock().unwrap();
-      let Some(inner) = guard.as_mut() else {
-        return Ok(false);
-      };
-      let Some(index) = inner.plugins.remove(plugin) else {
-        return Ok(false);
-      };
-      inner.commands.send(Command::Remove(index)).map_err(|e| e.to_string())?;
-      inner.host_ids.remove(&index);
-      inner.unloaded.remove(&index)
+    let Some(index) = self.index_of(plugin) else {
+      return Ok(false);
     };
-    if let Some(unloaded) = unloaded {
-      wait_unloaded(&unloaded, plugin)?;
-    }
+    self.unload_index(index)?;
     Ok(true)
   }
 
+  // Unloads a plugin instance by index (a live plugin or an export's).
+  pub fn unload_index(&self, index: usize) -> Result<(), String> {
+    let unloaded = {
+      let mut guard = self.inner.lock().unwrap();
+      let inner = guard.as_mut().ok_or("no plugins loaded")?;
+      if inner.rates.remove(&index).is_none() {
+        return Err("no such plugin".to_string());
+      }
+      inner.plugins.retain(|_, i| *i != index);
+      inner.params.remove(&index);
+      inner.host_ids.remove(&index);
+      inner.commands.send(Command::Remove(index)).map_err(|e| e.to_string())?;
+      inner.unloaded.remove(&index)
+    };
+    if let Some(unloaded) = unloaded {
+      wait_unloaded(&unloaded, &format!("plugin {}", index))?;
+    }
+    Ok(())
+  }
+
   pub fn reset(&self) {
-    for plugin in self.loaded() {
-      let _ = self.unload(&plugin);
+    let indices: Vec<usize> = self.inner.lock().unwrap().as_ref().map_or(Vec::new(), |inner| inner.rates.keys().copied().collect());
+    for index in indices {
+      let _ = self.unload_index(index);
     }
     *self.inner.lock().unwrap() = None;
   }
 }
-
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -352,5 +377,33 @@ mod tests {
     assert!(before > 0.01, "no sound before the change");
     assert!(after < before / 10.0, "the volume change didn't apply");
   }
-}
 
+  #[test]
+  fn renders_an_export_instance_without_disturbing_the_live_plugin() {
+    if super::super::plugins::plugin_names().iter().all(|n| n != "Surge XT") {
+      println!("Surge XT missing, skipping");
+      return;
+    }
+    let mixer = MixerEngine::default();
+    let live = mixer.load("Surge XT", 44100.0).unwrap();
+    // an export at another rate: its own instance, the live one stays
+    let export = mixer.load_instance("Surge XT", 48000.0).unwrap();
+    assert_ne!(live, export);
+    assert_eq!(mixer.load("Surge XT", 44100.0).unwrap(), live);
+    mixer.notes(export, vec![MixNote { time: 0.1, duration: 0.2, key: 60, velocity: 0.8 }]).unwrap();
+    let bytes = mixer.render(export, 0, 9600).unwrap();
+    let left: Vec<f32> = bytes.chunks_exact(8).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect();
+    let first = left.iter().position(|s| s.abs() > 1e-4).expect("no sound");
+    // at 48 kHz, 0.1 s is frame 4800; Surge XT's onset spreads more at this rate (measured +33..+89
+    // frames, with a sharp attack), so allow 2 ms
+    assert!((first as i64 - 4800).abs() <= 96, "first sound at frame {}", first);
+    mixer.unload_index(export).unwrap();
+    assert_eq!(mixer.loaded(), vec!["Surge XT".to_string()]);
+    // a new page rate reloads the live plugin
+    let reloaded = mixer.load("Surge XT", 48000.0).unwrap();
+    assert_ne!(reloaded, live);
+    assert_eq!(mixer.loaded(), vec!["Surge XT".to_string()]);
+    mixer.reset();
+    assert!(mixer.loaded().is_empty());
+  }
+}
