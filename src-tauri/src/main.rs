@@ -29,9 +29,12 @@ fn main() {
     .manage(oscbridge::AsyncInputTransmit {
       inner: Mutex::new(async_input_transmitter_osc),
     })
+    .plugin(tauri_plugin_clipboard_manager::init())
+    .plugin(tauri_plugin_dialog::init())
+    .plugin(tauri_plugin_fs::init())
     .invoke_handler(tauri::generate_handler![midibridge::sendmidi, oscbridge::sendosc])
     .setup(|app| {
-      let window = Arc::new(app.get_window("main").unwrap());
+      let window = Arc::new(app.get_webview_window("main").unwrap());
       let logger = Logger { window };
       midibridge::init(
         logger.clone(),

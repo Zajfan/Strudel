@@ -11,9 +11,29 @@ let TAURI;
 if (typeof window !== 'undefined') {
   TAURI = window?.__TAURI__;
 }
-export const { BaseDirectory, readDir, readBinaryFile, writeTextFile, readTextFile, exists } = TAURI?.fs || {};
-
-export const dir = BaseDirectory?.Audio; // https://tauri.app/v1/api/js/path#audiodir
+// Tauri 2's fs plugin (window.__TAURI__.fs with withGlobalTauri), wrapped so the calls below keep
+// Tauri 1's shape: paths are relative to the audio dir ({ dir }), and readDir can list recursively
+// into { name, path, children } entries.
+const fs = TAURI?.fs || {};
+export const BaseDirectory = fs.BaseDirectory;
+export const dir = BaseDirectory?.Audio; // https://v2.tauri.app/reference/javascript/api/namespacepath/#audiodir
+const withBaseDir = (options = {}) => ({ baseDir: options.dir ?? dir });
+export const exists = (path, options) => fs.exists(path, withBaseDir(options));
+export const readTextFile = (path, options) => fs.readTextFile(path, withBaseDir(options));
+export const writeTextFile = (path, data, options) => fs.writeTextFile(path, data, withBaseDir(options));
+export const readBinaryFile = (path, options) => fs.readFile(path, withBaseDir(options));
+export async function readDir(path, options = {}) {
+  const entries = await fs.readDir(path, withBaseDir(options));
+  return Promise.all(
+    entries.map(async (entry) => {
+      const entryPath = path ? `${path}/${entry.name}` : entry.name;
+      if (entry.isDirectory && options.recursive) {
+        return { name: entry.name, path: entryPath, children: await readDir(entryPath, options) };
+      }
+      return { name: entry.name, path: entryPath };
+    }),
+  );
+}
 const prefix = '~/music/';
 
 async function hasStrudelJson(subpath) {

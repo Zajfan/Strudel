@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use tauri::Window;
+use tauri::{Emitter, WebviewWindow};
 
 #[derive(Clone, serde::Serialize)]
 pub struct LoggerPayload {
@@ -9,7 +9,7 @@ pub struct LoggerPayload {
 
 #[derive(Clone)]
 pub struct Logger {
-  pub window: Arc<Window>,
+  pub window: Arc<WebviewWindow>,
 }
 
 impl Logger {
