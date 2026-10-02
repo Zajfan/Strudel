@@ -17,6 +17,12 @@
             "eventsAfterEnd": 8
           },
           {
+            "name": "arrange().once()",
+            "eventsInSong": 64,
+            "wrongSection": 0,
+            "eventsAfterEnd": 0
+          },
+          {
             "name": "arrange() + filterWhen(t < 64)",
             "eventsInSong": 64,
             "wrongSection": 0,
@@ -29,15 +35,14 @@
             "eventsAfterEnd": 0
           }
         ],
-        "headline": "8 sections, 64 bars via arrange() + filterWhen(t < 64)"
+        "headline": "8 sections, 64 bars via arrange().once()"
       },
       "notes": {
-        "ergonomics": "bare arrange() loops: 8 events after bar 64; a hard ending needs an extra construct (filterWhen or a silence tail)",
-        "construct": "arrange() + filterWhen(t < 64)"
+        "construct": "arrange().once()"
       },
       "run": {
-        "ranAt": "2026-09-29T12:17:18.424Z",
-        "commit": "96df6ef6",
+        "ranAt": "2026-10-02T04:12:20.946Z",
+        "commit": "0629d1cc",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",

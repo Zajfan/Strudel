@@ -226,6 +226,13 @@ describe('judgeArrangement', () => {
     expect(r.notes.construct).toBe('arrange() + filterWhen(t < 64)');
     expect(r.notes.ergonomics).toMatch(/bare arrange\(\) loops/);
   });
+  it('prefers the dedicated arrange().once() and drops the ergonomics note when it works', () => {
+    const once = { ...cut, name: 'arrange().once()' };
+    const r = judgeArrangement([loops, cut, once], shape);
+    expect(r.status).toBe('pass');
+    expect(r.notes.construct).toBe('arrange().once()');
+    expect(r.notes.ergonomics).toBeUndefined();
+  });
   it('fails when every candidate loops, has wrong sections, or is empty', () => {
     const wrong = { ...cut, name: 'b', wrongSection: 3 };
     const empty = { ...cut, name: 'c', eventsInSong: 0 };

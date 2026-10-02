@@ -53,6 +53,7 @@ Full three-tier run, all cells re-measured this date after the final-review fixe
 
 ### Sub-project 1 — Arrangement layer (ARR)
 - ARR-1 passes on cli and browser via `arrange(...).filterWhen((t) => t < 64)`: 64 events in the song, 0 in the wrong section, 0 after bar 64. `arrange(...sections, [1e6, silence])` also ends correctly within the probe window (it loops again only after 10^6 cycles). Ergonomics gap: bare `arrange()` loops (8 events after bar 64), so a hard ending needs one of these extra constructs; there is no dedicated "end" in the arrangement syntax.
+  - **Addressed 2026-10-02:** `arrange(...).once()` plays the song through once and ends; when played, the transport stops by itself once everything up to the end is scheduled (already scheduled notes still sound). `arrange` records its length as `_period`, `once()` its end as `_end`; both are carried through value-only operations (controls, `fmap`, context, filters, query state) and a `stack` ends when all its layers do. Time-changing operations (`fast`, `early`, ...) drop them, and then `once()` plays one cycle. ARR-1 now passes via `arrange().once()`; the browser probe also checks that the transport stops.
 - **ARR-1 (desktop: not-run):** no probe yet.
 
 ### Sub-project 2 — Mixer and routing (MIX, CUE)

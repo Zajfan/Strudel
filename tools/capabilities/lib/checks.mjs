@@ -24,12 +24,14 @@ export function judgeArrangement(candidates, { sections, bars }) {
   const end = sections * bars;
   const ok = (c) => c.eventsInSong > 0 && c.wrongSection === 0 && c.eventsAfterEnd === 0;
   const bare = candidates.find((c) => c.name === 'arrange()');
+  // the dedicated construct for a hard ending; the others are workarounds
+  const dedicated = candidates.find((c) => c.name === 'arrange().once()');
   const notes = {};
-  if (bare?.eventsAfterEnd > 0) {
+  if (bare?.eventsAfterEnd > 0 && !(dedicated && ok(dedicated))) {
     notes.ergonomics = `bare arrange() loops: ${bare.eventsAfterEnd} events after bar ${end}; a hard ending needs an extra construct (filterWhen or a silence tail)`;
   }
   const metrics = { sections, bars: end, candidates };
-  const passing = candidates.find(ok);
+  const passing = dedicated && ok(dedicated) ? dedicated : candidates.find(ok);
   if (passing) {
     return {
       status: 'pass',
