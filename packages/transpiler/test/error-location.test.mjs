@@ -38,8 +38,7 @@ describe('runtime error locations', () => {
 
   it('points at the user call site when the error is thrown inside library code', async () => {
     const err = await errorOf("const n = 1\n\nJSON.parse('{')\n");
-    // by name: evalScope(mini) replaces the global SyntaxError with the mini parser's
-    expect(err.name).toBe('SyntaxError');
+    expect(err).toBeInstanceOf(SyntaxError);
     expect(err.loc).toEqual({ line: 3, column: 5 });
   });
 
@@ -52,7 +51,7 @@ describe('runtime error locations', () => {
 
   it('keeps acorn locations for syntax errors', async () => {
     const err = await errorOf('a\n  .b(800 +)\n');
-    expect(err.name).toBe('SyntaxError');
+    expect(err).toBeInstanceOf(SyntaxError);
     expect(err.loc).toMatchObject({ line: 2, column: 10 });
     expect(err.message).toBe('Unexpected token (2:10)');
   });
