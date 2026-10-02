@@ -23,6 +23,7 @@
   },
   "dependencies": {
     "@strudel/core": "workspace:*",
+    "@strudel/webaudio": "workspace:*",
     "@tauri-apps/api": "^2.2.0"
   },
   "homepage": "https://codeberg.org/uzu/strudel#readme",

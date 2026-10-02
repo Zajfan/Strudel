@@ -18,7 +18,6 @@ struct Payload {
 }
 fn main() {
   let (async_input_transmitter_midi, async_input_receiver_midi) = mpsc::channel(1);
-  let (async_output_transmitter_midi, async_output_receiver_midi) = mpsc::channel(1);
   let (async_input_transmitter_osc, async_input_receiver_osc) = mpsc::channel(1);
   let (async_output_transmitter_osc, async_output_receiver_osc) = mpsc::channel(1);
   tauri::Builder
@@ -36,12 +35,7 @@ fn main() {
     .setup(|app| {
       let window = Arc::new(app.get_webview_window("main").unwrap());
       let logger = Logger { window };
-      midibridge::init(
-        logger.clone(),
-        async_input_receiver_midi,
-        async_output_receiver_midi,
-        async_output_transmitter_midi
-      );
+      midibridge::init(logger.clone(), async_input_receiver_midi);
       oscbridge::init(logger, async_input_receiver_osc, async_output_receiver_osc, async_output_transmitter_osc);
       Ok(())
     })

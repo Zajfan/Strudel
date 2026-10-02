@@ -1,18 +1,18 @@
 use std::collections::HashMap;
-use std::sync::Arc;
-use std::time::Duration;
+use std::sync::mpsc::{ channel, RecvTimeoutError };
+use std::thread::sleep;
+use std::time::{ Duration, Instant, SystemTime, UNIX_EPOCH };
 use midir::MidiOutput;
 
 use tokio::sync::{ mpsc, Mutex };
-use tokio::time::Instant;
 use serde::Deserialize;
-use std::thread::sleep;
 
 use crate::loggerbridge::Logger;
+
 pub struct MidiMessage {
   pub message: Vec<u8>,
-  pub instant: Instant,
-  pub offset: u64,
+  // when to send it
+  pub due: Instant,
   pub requestedport: String,
 }
 
@@ -20,53 +20,39 @@ pub struct AsyncInputTransmit {
   pub inner: Mutex<mpsc::Sender<Vec<MidiMessage>>>,
 }
 
-pub fn init(
-  logger: Logger,
-  async_input_receiver: mpsc::Receiver<Vec<MidiMessage>>,
-  mut async_output_receiver: mpsc::Receiver<Vec<MidiMessage>>,
-  async_output_transmitter: mpsc::Sender<Vec<MidiMessage>>
-) {
-  tauri::async_runtime::spawn(async move { async_process_model(async_input_receiver, async_output_transmitter).await });
-  let message_queue: Arc<Mutex<Vec<MidiMessage>>> = Arc::new(Mutex::new(Vec::new()));
-  /* ...........................................................
-         Listen For incoming messages and add to queue
-  ............................................................*/
-  let message_queue_clone = Arc::clone(&message_queue);
+// The longest the scheduler waits for new messages when none is queued.
+const IDLE_WAIT: Duration = Duration::from_millis(100);
+
+pub fn init(logger: Logger, mut async_input_receiver: mpsc::Receiver<Vec<MidiMessage>>) {
+  // Messages are sent from a dedicated thread, not an async task: it sleeps exactly until the next
+  // message is due (waiting on the channel, so new messages wake it), instead of polling every
+  // millisecond, and blocking there doesn't hold up the async runtime.
+  let (sender, receiver) = channel::<Vec<MidiMessage>>();
   tauri::async_runtime::spawn(async move {
-    loop {
-      if let Some(package) = async_output_receiver.recv().await {
-        let mut message_queue = message_queue_clone.lock().await;
-        let messages = package;
-        for message in messages {
-          (*message_queue).push(message);
-        }
+    while let Some(messages) = async_input_receiver.recv().await {
+      if sender.send(messages).is_err() {
+        break;
       }
     }
   });
 
-  let message_queue_clone = Arc::clone(&message_queue);
-  tauri::async_runtime::spawn(async move {
+  std::thread::spawn(move || {
     /* ...........................................................
                         Open Midi Ports
     ............................................................*/
     let midiout = MidiOutput::new("strudel").unwrap();
     let out_ports = midiout.ports();
     let mut port_names = Vec::new();
-    //TODO: Send these print messages to the UI logger instead of the rust console so the user can see them
     if out_ports.len() == 0 {
       logger.log(
         " No MIDI devices found. Connect a device or enable IAC Driver to enable midi.".to_string(),
         "".to_string()
       );
-      // logger(window, " No MIDI devices found. Connect a device or enable IAC Driver.".to_string(), None);
       return;
     }
-    // give the frontend couple seconds to load on start, or the log messages will get lost
     sleep(Duration::from_secs(3));
     logger.log(format!("Found {} midi devices!", out_ports.len()), "".to_string());
 
-    // the user could reference any port at anytime during runtime,
-    // so let's go ahead and open them all (same behavior as web app)
     let mut output_connections = HashMap::new();
     for i in 0..=out_ports.len().saturating_sub(1) {
       let midiout = MidiOutput::new("strudel").unwrap();
@@ -79,21 +65,32 @@ pub fn init(
       output_connections.insert(port_name, out_con);
     }
     /* ...........................................................
-                        Process queued messages 
+                        Send queued messages when due
     ............................................................*/
-
+    let mut queue: Vec<MidiMessage> = Vec::new();
     loop {
-      let mut message_queue = message_queue_clone.lock().await;
+      let wait = queue
+        .iter()
+        .map(|m| m.due.saturating_duration_since(Instant::now()))
+        .min()
+        .unwrap_or(IDLE_WAIT)
+        .min(IDLE_WAIT);
+      match receiver.recv_timeout(wait) {
+        Ok(messages) => queue.extend(messages),
+        Err(RecvTimeoutError::Timeout) => {}
+        Err(RecvTimeoutError::Disconnected) => return,
+      }
+      while let Ok(messages) = receiver.try_recv() {
+        queue.extend(messages);
+      }
 
-      //iterate over each message, play and remove messages when they are ready
-      message_queue.retain(|message| {
-        if message.instant.elapsed().as_millis() < message.offset.into() {
+      let now = Instant::now();
+      queue.retain(|message| {
+        if message.due > now {
           return true;
         }
         let mut out_con = output_connections.get_mut(&message.requestedport);
 
-        // WebMidi supports getting a connection by part of its name
-        // ex: 'bus 1' instead of 'IAC Driver bus 1' so let's emulate that behavior
         if out_con.is_none() {
           let key = port_names.iter().find(|port_name| {
             return port_name.contains(&message.requestedport);
@@ -104,7 +101,6 @@ pub fn init(
         }
 
         if out_con.is_some() {
-          // process the message
           if let Err(err) = (&mut out_con.unwrap()).send(&message.message) {
             logger.log(format!("Midi message send error: {}", err), "error".to_string());
           }
@@ -113,46 +109,39 @@ pub fn init(
         }
         return false;
       });
-
-      sleep(Duration::from_millis(1));
     }
   });
 }
 
-pub async fn async_process_model(
-  mut input_reciever: mpsc::Receiver<Vec<MidiMessage>>,
-  output_transmitter: mpsc::Sender<Vec<MidiMessage>>
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-  while let Some(input) = input_reciever.recv().await {
-    let output = input;
-    output_transmitter.send(output).await?;
-  }
-  Ok(())
-}
 #[derive(Deserialize)]
 pub struct MessageFromJS {
   message: Vec<u8>,
-  offset: u64,
+  // when to send it, as Unix-epoch milliseconds (the page computes it from the audio clock)
+  time: f64,
   requestedport: String,
 }
-// Called from JS
+
+// The Instant at which a Unix-epoch time (ms) arrives; times in the past are due now.
+fn due_instant(time: f64) -> Instant {
+  let now_ms = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs_f64() * 1000.0).unwrap_or(0.0);
+  let delay_ms = (time - now_ms).max(0.0);
+  Instant::now() + Duration::from_secs_f64(delay_ms / 1000.0)
+}
+
 #[tauri::command]
 pub async fn sendmidi(
   messagesfromjs: Vec<MessageFromJS>,
   state: tauri::State<'_, AsyncInputTransmit>
 ) -> Result<(), String> {
   let async_proc_input_tx = state.inner.lock().await;
-  let mut messages_to_process: Vec<MidiMessage> = Vec::new();
-
-  for m in messagesfromjs {
-    let message_to_process = MidiMessage {
-      instant: Instant::now(),
+  let messages_to_process: Vec<MidiMessage> = messagesfromjs
+    .into_iter()
+    .map(|m| MidiMessage {
+      due: due_instant(m.time),
       message: m.message,
-      offset: m.offset,
       requestedport: m.requestedport,
-    };
-    messages_to_process.push(message_to_process);
-  }
+    })
+    .collect();
 
   async_proc_input_tx.send(messages_to_process).await.map_err(|e| e.to_string())
 }

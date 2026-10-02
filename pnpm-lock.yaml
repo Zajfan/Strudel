@@ -299,6 +299,9 @@ importers:
       '@strudel/core':
         specifier: workspace:*
         version: link:../core
+      '@strudel/webaudio':
+        specifier: workspace:*
+        version: link:../webaudio
       '@tauri-apps/api':
         specifier: ^2.2.0
         version: 2.2.0
