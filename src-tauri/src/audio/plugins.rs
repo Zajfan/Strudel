@@ -21,6 +21,8 @@ use std::time::{ Duration, Instant, SystemTime, UNIX_EPOCH };
 use clack_extensions::audio_ports::{ AudioPortFlags, AudioPortInfoBuffer, PluginAudioPorts };
 use clack_extensions::log::{ HostLog, HostLogImpl, LogSeverity };
 use clack_extensions::note_ports::{ NoteDialect, NotePortInfoBuffer, PluginNotePorts };
+use clack_extensions::params::{ ParamInfoBuffer, ParamInfoFlags, PluginParams };
+use clack_host::events::event_types::ParamValueEvent;
 use clack_host::events::event_types::{ MidiEvent, NoteOffEvent, NoteOnEvent };
 use clack_host::events::Match;
 use clack_host::prelude::*;
@@ -40,12 +42,14 @@ struct Shared {
   callback_requested: AtomicBool,
   audio_ports: OnceLock<Option<PluginAudioPorts>>,
   note_ports: OnceLock<Option<PluginNotePorts>>,
+  params: OnceLock<Option<PluginParams>>,
 }
 
 impl<'a> SharedHandler<'a> for Shared {
   fn initializing(&self, instance: InitializingPluginHandle<'a>) {
     let _ = self.audio_ports.set(instance.get_extension());
     let _ = self.note_ports.set(instance.get_extension());
+    let _ = self.params.set(instance.get_extension());
   }
   fn request_restart(&self) {}
   fn request_process(&self) {}
@@ -72,12 +76,50 @@ impl HostHandlers for Host {
   }
 }
 
-struct Layout {
+// A parameter a pattern can automate (automatable, not read-only or hidden), in plain values.
+#[derive(Clone, Serialize)]
+pub struct ParamDesc {
+  pub id: u32,
+  pub name: String,
+  pub module: String,
+  pub min: f64,
+  pub max: f64,
+  pub default: f64,
+}
+
+fn params(instance: &mut PluginInstance<Host>) -> Vec<ParamDesc> {
+  let Some(ext) = instance.access_shared_handler(|s| s.params.get().copied().flatten()) else {
+    return Vec::new();
+  };
+  let handle = instance.plugin_handle();
+  let mut buf = ParamInfoBuffer::new();
+  let mut list = Vec::new();
+  for i in 0..ext.count(&handle) {
+    if let Some(info) = ext.get_info(&handle, i, &mut buf) {
+      let skip = ParamInfoFlags::IS_READONLY | ParamInfoFlags::IS_HIDDEN;
+      if !info.flags.contains(ParamInfoFlags::IS_AUTOMATABLE) || info.flags.intersects(skip) {
+        continue;
+      }
+      list.push(ParamDesc {
+        id: info.id.get(),
+        name: String::from_utf8_lossy(info.name).trim_end_matches('\0').to_string(),
+        module: String::from_utf8_lossy(info.module).trim_end_matches('\0').to_string(),
+        min: info.min_value,
+        max: info.max_value,
+        default: info.default_value,
+      });
+    }
+  }
+  list
+}
+
+pub(crate) struct Layout {
   inputs: Vec<usize>,
   outputs: Vec<usize>,
   main_output: usize,
   note_port: u16,
   use_midi: bool,
+  pub(crate) params: Vec<ParamDesc>,
 }
 
 fn scan_audio_ports(ext: &PluginAudioPorts, handle: &mut PluginMainThreadHandle, is_input: bool) -> Vec<(usize, bool)> {
@@ -127,7 +169,8 @@ fn layout(instance: &mut PluginInstance<Host>) -> Result<Layout, String> {
       (0, use_midi)
     }
   };
-  Ok(Layout { inputs, outputs, main_output, note_port, use_midi })
+  let params = params(instance);
+  Ok(Layout { inputs, outputs, main_output, note_port, use_midi, params })
 }
 
 // Where plugins are looked for: CLAP_PATH, then the standard per-user and system folders.
@@ -167,7 +210,7 @@ fn find_plugin(name: &str) -> Result<PathBuf, String> {
 pub(crate) struct NewSlot {
   pub(crate) index: usize,
   processor: StoppedPluginAudioProcessor<Host>,
-  layout: Layout,
+  pub(crate) layout: Layout,
   retire: Sender<StoppedPluginAudioProcessor<Host>>,
 }
 
@@ -280,10 +323,27 @@ impl Slot {
 
   // Renders n frames with the given (offset, event) notes and adds them into out (interleaved).
   pub(crate) fn render_into(&mut self, out: &mut [f32], n: usize, notes: &[(u32, NoteEvent)]) {
+    self.render_with_params(out, n, notes, &[]);
+  }
+
+  // As render_into, with (offset, param id, plain value) parameter changes; both in time order.
+  pub(crate) fn render_with_params(&mut self, out: &mut [f32], n: usize, notes: &[(u32, NoteEvent)], params: &[(u32, u32, f64)]) {
     self.events_in.clear();
     self.events_out.clear();
     let port = self.layout.note_port;
+    // CLAP wants the input events sorted by time: merge the two sorted lists
+    let mut p = 0;
+    let push_params_until = |events_in: &mut EventBuffer, p: &mut usize, until: u32| {
+      while *p < params.len() && params[*p].0 <= until {
+        let (offset, id, value) = params[*p];
+        if let Some(id) = ClapId::from_raw(id) {
+          events_in.push(&ParamValueEvent::new(offset, id, Pckn::match_all(), value));
+        }
+        *p += 1;
+      }
+    };
     for (offset, ev) in notes {
+      push_params_until(&mut self.events_in, &mut p, *offset);
       let key = ev.key as u16;
       if self.layout.use_midi {
         let vel = (ev.velocity * 127.0).round().clamp(1.0, 127.0) as u8;
@@ -298,6 +358,7 @@ impl Slot {
         }
       }
     }
+    push_params_until(&mut self.events_in, &mut p, u32::MAX);
     for port in self.out_bufs.iter_mut() {
       for ch in port.iter_mut() {
         ch.fill(0.0);

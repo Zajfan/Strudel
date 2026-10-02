@@ -4,7 +4,9 @@
 //    Three taps record at once: the plugin's channel, a reference superdough note's orbit, and the
 //    master mix. Checked: the plugin reaches the master, its notes start within MAX_SYNC_MS of the
 //    reference notes scheduled at the same times, and an orbit effect (room) applies to it.
-// 2. On a native output (.clap(name, { output: 'native' })): the engine plays on the harness's
+// 2. Parameter automation: a held note with .auto(saw.range(1, 0), { c: 'Global Volume' }); the
+//    plugin's channel must get much quieter across the note.
+// 3. On a native output (.clap(name, { output: 'native' })): the engine plays on the harness's
 //    silent device; checked through engine_capture and engine_stats, and unloading.
 // Without Surge XT in a CLAP folder this is not-run (see the follow-ups doc for installing it).
 
@@ -17,6 +19,7 @@ const REFERENCE_ORBIT = 3;
 const mixerCode = (room) =>
   `setcps(1)\n$: note("c4 ~ ~ ~").clap('${PLUGIN}').room(${room})\n` +
   `$: note("c6 ~ ~ ~").s("sine").gain(0.3).release(0.05).orbit(${REFERENCE_ORBIT})`;
+const AUTO_CODE = `setcps(0.5)\nnote("c4").clap('${PLUGIN}').auto(saw.range(1, 0), { c: 'Global Volume' })`;
 const NATIVE_CODE = `setcps(1)\nnote("c4 e4 g4 c5").clap('${PLUGIN}', { output: 'native' })`;
 
 // Runs in the page; serialized with toString(), so no closures over Node scope.
@@ -166,7 +169,22 @@ export async function probe({ page, thresholds }) {
   };
   const tailGainDb = 20 * Math.log10(tail(wet) / Math.max(1e-9, tail(dry)));
 
-  // 2. on a native output
+  // 2. parameter automation, and the parameter list
+  const auto = await page.evaluate(recordMixer, { code: AUTO_CODE, seconds: 2.5, plugin: PLUGIN, orbit: REFERENCE_ORBIT }, { timeoutMs: 90000 });
+  const paramNames = await page.evaluate(async (plugin) => (await clapParams(plugin)).map((p) => p.name), PLUGIN);
+  let automationDropDb = NaN;
+  if (!auto.error) {
+    const p = decode(auto.plugin);
+    const start = onsets(p, 0.05 * peak(p), gap)[0];
+    // the note lasts one cycle (2 s): its first and last fifth
+    if (start !== undefined && start + 2 * sr <= p.length) {
+      const early = rmsOf(p, start + Math.round(0.1 * sr), start + Math.round(0.4 * sr));
+      const late = rmsOf(p, start + Math.round(1.5 * sr), start + Math.round(1.8 * sr));
+      automationDropDb = 20 * Math.log10(early / Math.max(1e-9, late));
+    }
+  }
+
+  // 3. on a native output
   const native = await page.evaluate(playNative, { code: NATIVE_CODE, seconds: 3, plugin: PLUGIN }, { timeoutMs: 120000 });
   const metrics = {
     pluginNotes: pluginOnsets.length,
@@ -176,10 +194,12 @@ export async function probe({ page, thresholds }) {
     pluginRms: rmsOf(plugin, 0, plugin.length),
     masterRms: rmsOf(master, 0, master.length),
     reverbTailGainDb: tailGainDb,
+    automatableParams: paramNames.length,
+    automationDropDb,
     native: native.error
       ? { error: native.error }
       : { notes: native.stats.notes, lateNotes: native.stats.lateNotes, device: native.stats.device, rms: native.rms, loadedAfterUnload: native.loadedAfterUnload },
-    headline: `${PLUGIN} in the mixer: within ${maxOffsetMs.toFixed(1)} ms of the beat, room +${tailGainDb.toFixed(1)} dB; native: ${native.stats?.notes ?? 0} notes`,
+    headline: `${PLUGIN} in the mixer: within ${maxOffsetMs.toFixed(1)} ms of the beat, room +${tailGainDb.toFixed(1)} dB, automation -${automationDropDb.toFixed(0)} dB; native: ${native.stats?.notes ?? 0} notes`,
   };
   const fail = (error) => ({ status: 'fail', metrics, notes: { ...notes, error } });
   if (!(pluginOnsets.length >= SECONDS - 1)) return fail(`${pluginOnsets.length} plugin notes recorded on its channel`);
@@ -188,6 +208,9 @@ export async function probe({ page, thresholds }) {
   if (!(offsetsMs.length >= SECONDS - 1)) return fail(`only ${offsetsMs.length} plugin notes matched the reference notes`);
   if (!(maxOffsetMs <= MAX_SYNC_MS)) return fail(`plugin notes off the reference by up to ${maxOffsetMs.toFixed(2)} ms`);
   if (!(tailGainDb >= 6)) return fail(`room(0.8) added only ${tailGainDb.toFixed(1)} dB after the plugin notes`);
+  if (auto.error) return fail(`automation: ${auto.error}`);
+  if (!paramNames.includes('Global Volume')) return fail(`clapParams has no "Global Volume" (${paramNames.length} parameters)`);
+  if (!(automationDropDb >= 12)) return fail(`automating Global Volume 1 -> 0 lowered the note by only ${automationDropDb.toFixed(1)} dB`);
   if (native.error) return fail(`native output: ${native.error}`);
   if (!(native.stats.notes >= 11) || native.stats.lateNotes > 0) return fail(`native output: ${native.stats.notes} notes, ${native.stats.lateNotes} late`);
   if (!(native.rms >= thresholds.minRms)) return fail(`native output rms ${native.rms}`);

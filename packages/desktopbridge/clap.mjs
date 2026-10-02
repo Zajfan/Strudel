@@ -66,7 +66,8 @@ const loadPlayer = (audioContext) => {
   return playerModules.get(audioContext);
 };
 
-// per plugin: { audioContext, ready: Promise<index> }, for the current AudioContext
+// per plugin: { audioContext, ready: Promise<{ index, params }> }, for the current AudioContext;
+// params maps a parameter's lower-case name to { id, name, module, min, max, default }
 const streams = new Map();
 
 function getStream(plugin) {
@@ -75,6 +76,7 @@ function getStream(plugin) {
   if (stream?.audioContext === audioContext) return stream;
   const ready = (async () => {
     const index = await Invoke('mix_load', { plugin, sampleRate: audioContext.sampleRate });
+    const params = new Map((await Invoke('mix_param_list', { plugin: index })).map((p) => [p.name.toLowerCase(), p]));
     await loadPlayer(audioContext);
     const player = new AudioWorkletNode(audioContext, 'strudel-plugin-player', {
       numberOfInputs: 0,
@@ -92,7 +94,7 @@ function getStream(plugin) {
       }
     };
     player.connect(getExternalChannel(`clap:${plugin}`).input);
-    return index;
+    return { index, params };
   })();
   stream = { audioContext, ready };
   streams.set(plugin, stream);
@@ -101,14 +103,35 @@ function getStream(plugin) {
 
 const toKey = (note) => (typeof note === 'number' ? Math.round(note) : noteToMidi(note));
 
+// The hap's automation curves (see `auto`) that name one of the plugin's parameters, as timed plain
+// values: each curve spans the note, and the parameter keeps its last value afterwards.
+function paramChanges(value, params, time, duration) {
+  const changes = [];
+  for (const id of value.auto?.__ids ?? []) {
+    const { control, curve } = value.auto[id];
+    const param = params.get(String(control).toLowerCase());
+    if (!param) continue;
+    curve.forEach((x, k) => {
+      const at = time + (curve.length > 1 ? (duration * k) / (curve.length - 1) : 0);
+      changes.push({ time: at, id: param.id, value: Math.min(param.max, Math.max(param.min, x)) });
+    });
+  }
+  return changes;
+}
+
 function playInMixer(plugin, hap, cps, targetTime) {
   const { note, velocity = 0.9 } = hap.value;
   // the channel takes the orbit-level controls (gain, pan, orbit, delay, room, cue) from this time
   getExternalChannel(`clap:${plugin}`).update(hap.value, targetTime, cps);
-  if (note == null) return;
-  const notes = [{ time: targetTime, duration: hap.duration.valueOf() / cps, key: toKey(note), velocity: Math.min(1, velocity) }];
+  const duration = hap.duration.valueOf() / cps;
   getStream(plugin)
-    .ready.then((index) => Invoke('mix_notes', { plugin: index, notes }))
+    .ready.then(async ({ index, params }) => {
+      const changes = paramChanges(hap.value, params, targetTime, duration);
+      if (changes.length) await Invoke('mix_params', { plugin: index, params: changes });
+      if (note == null) return;
+      const notes = [{ time: targetTime, duration, key: toKey(note), velocity: Math.min(1, velocity) }];
+      await Invoke('mix_notes', { plugin: index, notes });
+    })
     .catch((err) => logger(`[clap] ${plugin}: ${err}`, 'error'));
 }
 
@@ -133,7 +156,9 @@ function playNative(plugin, hap, currentTime, cps, targetTime) {
  * Plays the pattern's notes on a CLAP instrument plugin (desktop app only), e.g.
  *   note("c3 e3 g3 c4").clap('Surge XT').room(0.3)
  * By default the plugin plays through Strudel's mixer: orbit effects (room, delay, ducking), gain,
- * pan, stems and cue apply to it, and it is in time with everything else. `{ output: 'native' }`
+ * pan, stems and cue apply to it, and it is in time with everything else. Its parameters can be
+ * automated with `auto`, by name (clapParams lists them), in their own value range:
+ *   note("c2").clap('Surge XT').auto(sine.range(0, 1).slow(4), { c: 'Global Volume' }) `{ output: 'native' }`
  * plays it on the plugin output device instead (lower latency, no Strudel effects).
  * Uses note and velocity (0-1, default 0.9) per note, and each note's duration.
  * @name clap
@@ -151,6 +176,9 @@ Pattern.prototype.clap = function (plugin, { output = 'mixer' } = {}) {
     }
   });
 };
+
+// The parameters of a plugin that patterns can automate: [{ id, name, module, min, max, default }].
+export const clapParams = async (plugin) => [...(await getStream(plugin).ready).params.values()];
 
 // the CLAP plugins the desktop app can load, by name
 export const clapPlugins = () => Invoke('clap_plugins');

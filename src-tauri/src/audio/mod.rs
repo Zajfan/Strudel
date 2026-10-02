@@ -8,7 +8,8 @@ use tauri::ipc::{ InvokeBody, Request, Response };
 use tauri::State;
 
 use cue::{ CueState, CueStats };
-use mixer::{ MixNote, MixerEngine };
+use mixer::{ MixNote, MixParam, MixerEngine };
+use plugins::ParamDesc;
 use plugins::{ EngineStats, NoteFromJs, PluginEngine };
 
 #[tauri::command]
@@ -118,4 +119,14 @@ pub fn mix_notes(plugin: usize, notes: Vec<MixNote>, mixer: State<'_, MixerEngin
 #[tauri::command]
 pub fn mix_render(plugin: usize, start: i64, frames: usize, mixer: State<'_, MixerEngine>) -> Result<Response, String> {
   Ok(Response::new(mixer.render(plugin, start, frames)?))
+}
+
+#[tauri::command]
+pub fn mix_param_list(plugin: usize, mixer: State<'_, MixerEngine>) -> Result<Vec<ParamDesc>, String> {
+  mixer.param_list(plugin)
+}
+
+#[tauri::command]
+pub fn mix_params(plugin: usize, params: Vec<MixParam>, mixer: State<'_, MixerEngine>) -> Result<(), String> {
+  mixer.params(plugin, params)
 }

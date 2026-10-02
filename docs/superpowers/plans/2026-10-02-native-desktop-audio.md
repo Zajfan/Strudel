@@ -55,4 +55,9 @@ WebKitGTK (the desktop webview) cannot play to a second output device (no `setSi
   keeps the native output (lower latency, no Strudel effects).
 - Per-voice controls (filters, envelopes) don't apply to a plugin stream; exports (offline renders)
   don't include plugins yet (the player pulls asynchronously).
-- Next: parameter automation (`.auto()` on plugin parameters), then plugin GUIs (floating windows).
+- Done 2026-10-02: plugin parameter automation in the mixer. A plugin's automatable parameters are
+  read at load (CLAP params; `clapParams(name)` lists them, Surge XT: 598), and an `.auto()` curve
+  whose control names a parameter is sent as timed plain values (`mix_params`) and applied as
+  ParamValueEvents at their frames: `.clap('Surge XT').auto(sine.range(0, 1).slow(4), { c: 'Global Volume' })`.
+  Not on the native output yet.
+- Next: plugin GUIs (floating windows; needs CLAP gui plus timer/posix-fd support on Linux).

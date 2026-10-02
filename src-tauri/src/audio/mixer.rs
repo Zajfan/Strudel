@@ -13,7 +13,7 @@ use std::time::{ Duration, Instant };
 
 use serde::Deserialize;
 
-use super::plugins::{ load_plugin, NewSlot, NoteEvent, Slot, BLOCK, CHANNELS };
+use super::plugins::{ load_plugin, NewSlot, NoteEvent, ParamDesc, Slot, BLOCK, CHANNELS };
 
 #[derive(Deserialize)]
 pub struct MixNote {
@@ -22,6 +22,22 @@ pub struct MixNote {
   duration: f64,
   key: u8,
   velocity: f64,
+}
+
+#[derive(Deserialize)]
+pub struct MixParam {
+  // seconds on the page's audio clock
+  time: f64,
+  // the parameter's id (see mix_param_list) and its plain value
+  id: u32,
+  value: f64,
+}
+
+#[derive(Clone, Copy)]
+struct FrameParam {
+  frame: i64,
+  id: u32,
+  value: f64,
 }
 
 #[derive(Clone, Copy)]
@@ -35,6 +51,7 @@ struct FrameNote {
 enum Command {
   Add(NewSlot),
   Notes(usize, Vec<FrameNote>),
+  Params(usize, Vec<FrameParam>),
   Render { plugin: usize, start: i64, frames: usize, reply: Sender<Vec<u8>> },
   Remove(usize),
 }
@@ -43,6 +60,7 @@ struct Inner {
   commands: Sender<Command>,
   sample_rate: f64,
   plugins: HashMap<String, usize>,
+  params: HashMap<usize, Vec<ParamDesc>>,
   threads: HashMap<usize, JoinHandle<()>>,
   next_index: usize,
 }
@@ -54,24 +72,31 @@ pub struct MixerEngine {
 
 // The render thread: plugins with their pending notes, rendering on request.
 fn render_thread(commands: Receiver<Command>) {
-  let mut slots: HashMap<usize, (Slot, Vec<FrameNote>)> = HashMap::new();
+  // per plugin: the slot, its pending notes and its pending parameter changes
+  let mut slots: HashMap<usize, (Slot, Vec<FrameNote>, Vec<FrameParam>)> = HashMap::new();
   let mut block_notes: Vec<(u32, NoteEvent)> = Vec::with_capacity(256);
+  let mut block_params: Vec<(u32, u32, f64)> = Vec::with_capacity(256);
   while let Ok(command) = commands.recv() {
     match command {
       Command::Add(new) => {
         let index = new.index;
         if let Ok(slot) = Slot::new(new) {
-          slots.insert(index, (slot, Vec::new()));
+          slots.insert(index, (slot, Vec::new(), Vec::new()));
         }
       }
       Command::Notes(plugin, notes) => {
-        if let Some((_, pending)) = slots.get_mut(&plugin) {
+        if let Some((_, pending, _)) = slots.get_mut(&plugin) {
           pending.extend(notes);
+        }
+      }
+      Command::Params(plugin, params) => {
+        if let Some((_, _, pending)) = slots.get_mut(&plugin) {
+          pending.extend(params);
         }
       }
       Command::Render { plugin, start, frames, reply } => {
         let mut out = vec![0.0f32; frames * CHANNELS];
-        if let Some((slot, pending)) = slots.get_mut(&plugin) {
+        if let Some((slot, pending, pending_params)) = slots.get_mut(&plugin) {
           let mut done = 0usize;
           while done < frames {
             let n = BLOCK.min(frames - done);
@@ -89,21 +114,30 @@ fn render_thread(commands: Receiver<Command>) {
               false
             });
             block_notes.sort_by_key(|(o, ev)| (*o, ev.on));
-            slot.render_into(&mut out[done * CHANNELS..(done + n) * CHANNELS], n, &block_notes);
+            block_params.clear();
+            pending_params.retain(|param| {
+              if param.frame >= to {
+                return true;
+              }
+              block_params.push(((param.frame - from).max(0) as u32, param.id, param.value));
+              false
+            });
+            block_params.sort_by_key(|(o, _, _)| *o);
+            slot.render_with_params(&mut out[done * CHANNELS..(done + n) * CHANNELS], n, &block_notes, &block_params);
             done += n;
           }
         }
         let _ = reply.send(out.iter().flat_map(|s| s.to_le_bytes()).collect());
       }
       Command::Remove(plugin) => {
-        if let Some((slot, _)) = slots.remove(&plugin) {
+        if let Some((slot, _, _)) = slots.remove(&plugin) {
           slot.retire();
         }
       }
     }
   }
   // the engine is gone: hand every plugin back for deactivation
-  for (_, (slot, _)) in slots.drain() {
+  for (_, (slot, _, _)) in slots.drain() {
     slot.retire();
   }
 }
@@ -121,7 +155,7 @@ impl MixerEngine {
     let inner = guard.get_or_insert_with(|| {
       let (commands, receiver) = channel();
       std::thread::spawn(move || render_thread(receiver));
-      Inner { commands, sample_rate, plugins: HashMap::new(), threads: HashMap::new(), next_index: 0 }
+      Inner { commands, sample_rate, plugins: HashMap::new(), params: HashMap::new(), threads: HashMap::new(), next_index: 0 }
     });
     if let Some(&index) = inner.plugins.get(plugin) {
       return Ok(index);
@@ -129,6 +163,7 @@ impl MixerEngine {
     let index = inner.next_index;
     inner.next_index += 1;
     let (slot, thread) = load_plugin(plugin, index, sample_rate)?;
+    inner.params.insert(index, slot.layout.params.clone());
     inner.commands.send(Command::Add(slot)).map_err(|e| e.to_string())?;
     inner.plugins.insert(plugin.to_string(), index);
     inner.threads.insert(index, thread);
@@ -147,6 +182,24 @@ impl MixerEngine {
       frames.push(FrameNote { frame: off.max(on + 1), key: note.key, velocity: 0.0, on: false });
     }
     inner.commands.send(Command::Notes(plugin, frames)).map_err(|e| e.to_string())
+  }
+
+  // the parameters a pattern can automate on a loaded plugin
+  pub fn param_list(&self, plugin: usize) -> Result<Vec<ParamDesc>, String> {
+    let guard = self.inner.lock().unwrap();
+    let inner = guard.as_ref().ok_or("no plugins loaded")?;
+    inner.params.get(&plugin).cloned().ok_or_else(|| "no such plugin".to_string())
+  }
+
+  pub fn params(&self, plugin: usize, params: Vec<MixParam>) -> Result<(), String> {
+    let guard = self.inner.lock().unwrap();
+    let inner = guard.as_ref().ok_or("no plugins loaded")?;
+    let sr = inner.sample_rate;
+    let frames = params
+      .into_iter()
+      .map(|p| FrameParam { frame: (p.time * sr).round() as i64, id: p.id, value: p.value })
+      .collect();
+    inner.commands.send(Command::Params(plugin, frames)).map_err(|e| e.to_string())
   }
 
   // Interleaved stereo little-endian f32 for frames [start, start + frames) of the page's clock.
@@ -236,4 +289,39 @@ mod tests {
     mixer.reset();
     assert!(mixer.loaded().is_empty());
   }
+
+  #[test]
+  fn automates_a_plugin_parameter_at_its_frame() {
+    if super::super::plugins::plugin_names().iter().all(|n| n != "Surge XT") {
+      println!("Surge XT missing, skipping");
+      return;
+    }
+    let sr = 44100.0;
+    let mixer = MixerEngine::default();
+    let index = mixer.load("Surge XT", sr).unwrap();
+    let params = mixer.param_list(index).unwrap();
+    println!("{} parameters; volume-like: {:?}", params.len(), params.iter().filter(|p| p.name.to_lowercase().contains("volume")).take(5).map(|p| (&p.name, &p.module, p.min, p.max)).collect::<Vec<_>>());
+    let volume = params
+      .iter()
+      .find(|p| p.name.eq_ignore_ascii_case("Global Volume") || p.name.eq_ignore_ascii_case("Volume"))
+      .expect("no volume parameter");
+    // a held note; the volume drops to its minimum at 0.5 s
+    mixer.notes(index, vec![MixNote { time: 0.05, duration: 0.95, key: 60, velocity: 0.8 }]).unwrap();
+    mixer.params(index, vec![MixParam { time: 0.5, id: volume.id, value: volume.min }]).unwrap();
+    let mut left = Vec::new();
+    for chunk in 0..43 {
+      let bytes = mixer.render(index, chunk * 1024, 1024).unwrap();
+      left.extend(bytes.chunks_exact(8).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])));
+    }
+    let rms = |from: f64, to: f64| {
+      let part = &left[(from * sr) as usize..(to * sr) as usize];
+      (part.iter().map(|s| s * s).sum::<f32>() / part.len() as f32).sqrt()
+    };
+    let (before, after) = (rms(0.3, 0.48), rms(0.55, 0.9));
+    println!("rms before {} after {} ({})", before, after, volume.name);
+    mixer.reset();
+    assert!(before > 0.01, "no sound before the change");
+    assert!(after < before / 10.0, "the volume change didn't apply");
+  }
 }
+
