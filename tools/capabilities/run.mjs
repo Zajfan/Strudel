@@ -19,6 +19,7 @@ import { parseArgs } from 'node:util';
 import { findChromium, launchChromium } from './lib/browser/chromium.mjs';
 import { openPage, waitForRepl } from './lib/browser/cdp.mjs';
 import { startStaticServer } from './lib/browser/server.mjs';
+import { buildApp, desktopPrerequisites, startDesktop } from './lib/desktop/harness.mjs';
 import { cellsForTier, loadCapabilities, renderMatrix, TIERS } from './lib/matrix.mjs';
 import { normalizeResult, runProbe } from './lib/result.mjs';
 
@@ -143,6 +144,55 @@ async function runBrowserTier(tier, only) {
   return results;
 }
 
+// Desktop tier: probes that export `usesPage` get a fresh app session (lib/desktop/harness.mjs); the
+// app is built and the harness started only when the first such probe runs. Others run as in runTier.
+async function runDesktopTier(tier, only) {
+  const results = {};
+  let desktop;
+  let desktopError;
+  const ensureDesktop = async (log) => {
+    if (desktop || desktopError) return;
+    const missing = desktopPrerequisites(repoRoot);
+    if (missing.length) {
+      desktopError = `desktop harness prerequisites missing: ${missing.join(', ')}`;
+      return;
+    }
+    try {
+      desktop = await startDesktop({ application: buildApp(repoRoot, log) });
+    } catch (err) {
+      desktopError = `could not start the desktop app: ${err.message}`;
+    }
+  };
+  try {
+    for (const cell of cellsForTier(caps, tier)) {
+      if (only && cell.id !== only) continue;
+      const probePath = join(here, 'probes', tier, `${cell.id}.mjs`);
+      if (!existsSync(probePath)) continue;
+      console.log(`[${tier}] ${cell.id} ...`);
+      const url = pathToFileURL(probePath).href;
+      const log = (...args) => console.log(`  [${cell.id}]`, ...args);
+      let page;
+      results[cell.id] = await runProbe(
+        async (c) => {
+          const mod = await import(url);
+          if (!mod.usesPage) return mod.probe(c);
+          await ensureDesktop(log);
+          if (desktopError) return { status: 'not-run', metrics: {}, notes: { reason: desktopError } };
+          page = await desktop.openPage();
+          await waitForRepl(page);
+          return mod.probe({ ...c, page });
+        },
+        { tier, thresholds: cell.thresholds, repoRoot, tmpDir: tmpdir(), log },
+      );
+      if (page) await page.close();
+      console.log(`[${tier}] ${cell.id}: ${results[cell.id].status}`);
+    }
+  } finally {
+    desktop?.close();
+  }
+  return results;
+}
+
 function ingest(tier, file) {
   const known = new Set(cellsForTier(caps, tier).map((c) => c.id));
   const raw = JSON.parse(readFileSync(file, 'utf8')).results ?? {};
@@ -236,7 +286,9 @@ if (!values['matrix-only']) {
     ? ingest(tier, values.ingest)
     : tier === 'browser'
       ? await runBrowserTier(tier, values.only)
-      : await runTier(tier, values.only);
+      : tier === 'desktop'
+        ? await runDesktopTier(tier, values.only)
+        : await runTier(tier, values.only);
   const provenanced = withProvenance(results, tier, source);
   const date = new Date().toISOString().slice(0, 10);
   const file = join(resultsDir, `${date}-${tier}.json`);

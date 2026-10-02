@@ -1,5 +1,7 @@
-// PERF-1 (browser): V voices sound continuously for 60 s with 0 late starts and no silent RMS
-// window. Instruments AudioScheduledSourceNode.prototype.start (when vs. context.currentTime) and
+// PERF-1 (browser; desktop through the WebKitGTK harness): V voices sound continuously for 60 s with
+// 0 late starts and no silent RMS window once the sound has started (the start-up time is reported
+// as firstSoundS: WebKitGTK takes ~1.5 s). On desktop there is no DevTools protocol, so page.warnings
+// is empty and late starts are counted from the start() instrumentation alone. Instruments AudioScheduledSourceNode.prototype.start (when vs. context.currentTime) and
 // taps an AnalyserNode onto whatever connects to context.destination (same technique as the
 // (uncommitted) tools/baseline/browser-instrumentation.js probe, reimplemented here since that file
 // isn't part of this repo's history).
@@ -79,13 +81,21 @@ async function playAndMeasure(V) {
     const cps = m.repl.scheduler.cps;
     const late = starts.filter((s) => s.when < s.now).length;
     const minLeadMs = starts.length ? Math.min(...starts.map((s) => (s.when - s.now) * 1000)) : null;
-    const silentWindows = rms.filter((v, i) => (i * SAMPLE_MS) / 1000 >= 1 && v === 0).length;
+    // when the first sound was heard, by the analyser: start-up time, reported on its own
+    const firstSound = rms.findIndex((v) => v > 0);
+    const firstSoundS = firstSound < 0 ? null : (firstSound * SAMPLE_MS) / 1000;
+    // dropouts: silent windows once sound has started (and at least a second in)
+    const from = Math.max(1, firstSoundS ?? Infinity);
+    const silentAt = rms.map((v, i) => (i * SAMPLE_MS) / 1000).filter((t, i) => t >= from && rms[i] === 0);
+    const silentWindows = firstSoundS === null ? rms.length : silentAt.length;
     return {
       error,
       starts: starts.length,
       late,
       minLeadMs,
       silentWindows,
+      silentAt: silentAt.slice(0, 20),
+      firstSoundS,
       durationS,
       cps,
       analyserCount: analysers.length,
@@ -120,6 +130,8 @@ export async function probe({ page, thresholds }) {
     droppedPastHaps,
     minLeadMs: result.minLeadMs,
     silentWindows: result.silentWindows,
+    silentAt: result.silentAt,
+    firstSoundS: result.firstSoundS,
     durationS: result.durationS,
     cps: result.cps,
     analyserCount: result.analyserCount,
@@ -143,7 +155,7 @@ export async function probe({ page, thresholds }) {
     };
   }
   if (result.silentWindows !== 0) {
-    return { status: 'fail', metrics, notes: { ...notes, error: `${result.silentWindows} silent RMS window(s) after the first second` } };
+    return { status: 'fail', metrics, notes: { ...notes, error: `${result.silentWindows} silent RMS window(s) after the sound started` } };
   }
   return { status: 'pass', metrics, notes };
 }

@@ -81,3 +81,23 @@ prerequisite, instead of failing the whole run.
 results (e.g. from `tools/baseline/`, as in `tools/baseline/README.md`).
 Save output as `{ "results": { "<ID>": { status, metrics, notes } } }` and
 ingest it the same way as before.
+
+## Desktop tier
+
+`--tier desktop` runs the desktop app (src-tauri, Tauri 2) the way users get it: `cargo build
+--features custom-protocol` embeds `website/dist`, so build the website first. Probes that export
+`usesPage` get a fresh app session through `lib/desktop/harness.mjs`: a private Xvfb display,
+`tauri-driver` (a WebDriver server) over `WebKitWebDriver`, and a `page` with the same `evaluate`
+and `click` as the browser tier, so most desktop probes re-export the browser probe. Differences
+from the browser `page`: no DevTools protocol (`page.send` throws, `page.warnings` stays empty), and
+`click` dispatches mouse events from script, because WebKitWebDriver supports neither pointer
+actions nor element clicks in the embedded webview.
+
+The app never reaches the user's session: `WAYLAND_DISPLAY` is removed and `GDK_BACKEND=x11` keeps
+the window on Xvfb (otherwise GTK opens it on the real Wayland desktop), and
+`GST_PLUGIN_FEATURE_RANK=fakeaudiosink:MAX` sends WebKitGTK's audio to a silent GStreamer sink.
+
+Prerequisites: `Xvfb`, `WebKitWebDriver` (WebKitGTK), `tauri-driver` (`cargo install
+tauri-driver --locked`), the Tauri 2 Linux libraries (webkit2gtk-4.1, libsoup-3.0), and for
+SYNC-1 `aseqdump` (alsa-utils) and an ALSA "Midi Through" port (snd-seq-dummy). Missing harness
+prerequisites make the page probes `not-run` with the reason.

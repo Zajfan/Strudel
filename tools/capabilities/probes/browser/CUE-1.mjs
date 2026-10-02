@@ -84,6 +84,19 @@ export async function probe({ page }) {
     code: CODE,
     scope: 'headless Chromium, one fake output device: the cue stream is verified, a second physical device is not',
   };
+  // the cue plays through an <audio> element on another device: without setSinkId on media elements
+  // (WebKitGTK, so the desktop app) the engine cannot do that at all
+  const setSinkId = await page.evaluate(() => typeof HTMLMediaElement.prototype.setSinkId);
+  if (setSinkId !== 'function') {
+    return {
+      status: 'wall',
+      metrics: { setSinkId, headline: 'no setSinkId on media elements' },
+      notes: {
+        ...notes,
+        evidence: `HTMLMediaElement.prototype.setSinkId is ${setSinkId} in this engine, so no element can play on a second output device; a cue needs a native audio output here`,
+      },
+    };
+  }
   const out = await page.evaluate(cueInPage, { code: CODE, seconds: SECONDS }, { timeoutMs: (SECONDS + 60) * 1000 });
   if (out.missing) return { status: 'fail', metrics: { headline: `no ${out.missing}` }, notes: { ...notes, error: `no ${out.missing} in the page` } };
   if (out.error) return { status: 'fail', metrics: {}, notes: { ...notes, error: out.error } };
