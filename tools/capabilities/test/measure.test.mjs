@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cents, decodeFloat32, estimateFrequency, firstIndexAbove, toDb, windowRms } from '../lib/measure.mjs';
+import { cents, decodeFloat32, estimateFrequency, firstIndexAbove, toDb, windowRms, toneDb } from '../lib/measure.mjs';
 
 const sine = (freq, seconds, sampleRate = 48000, amp = 0.5) =>
   Float32Array.from({ length: Math.round(seconds * sampleRate) }, (_, i) => amp * Math.sin((2 * Math.PI * freq * i) / sampleRate));
@@ -48,5 +48,14 @@ describe('decodeFloat32', () => {
     const x = Float32Array.from([0.25, -1, 3.5]);
     const b64 = Buffer.from(x.buffer).toString('base64');
     expect(Array.from(decodeFloat32(b64))).toEqual([0.25, -1, 3.5]);
+  });
+});
+
+describe('toneDb', () => {
+  it('gives 0 dB for a full-scale sine at its frequency and far less at another', () => {
+    const sr = 48000;
+    const sine = Float32Array.from({ length: sr }, (_, i) => Math.sin((2 * Math.PI * 1000 * i) / sr));
+    expect(toneDb(sine, sr, 1000)).toBeCloseTo(0, 1);
+    expect(toneDb(sine, sr, 440)).toBeLessThan(-60);
   });
 });
