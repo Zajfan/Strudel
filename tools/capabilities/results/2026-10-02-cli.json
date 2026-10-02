@@ -188,22 +188,27 @@
       }
     },
     "EXP-1": {
-      "status": "fail",
+      "status": "pass",
       "metrics": {
         "events": 1115,
-        "rms": 0.09022458557134133,
+        "rms": 0.09017486756576179,
         "lengthSamples": 3120000,
         "expectedLength": 3120000,
-        "firstDifferenceLeft": 1,
-        "firstDifferenceRight": 1,
-        "headline": "non-deterministic"
+        "wav": {
+          "channels": 2,
+          "sampleRate": 48000,
+          "bitsPerSample": 16,
+          "bytes": 12480044
+        },
+        "wavIdentical": true,
+        "firstDifferenceLeft": -1,
+        "firstDifferenceRight": -1,
+        "headline": "65 s WAV, byte-identical"
       },
-      "notes": {
-        "error": "renders differ from sample 1 (0.000 s). Suspect: Math.random() in supradough noise/supersaw oscillators"
-      },
+      "notes": {},
       "run": {
-        "ranAt": "2026-09-29T12:17:18.424Z",
-        "commit": "96df6ef6",
+        "ranAt": "2026-10-02T04:43:38.802Z",
+        "commit": "3dc3478e",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
@@ -214,26 +219,33 @@
       }
     },
     "EXP-2": {
-      "status": "fail",
+      "status": "pass",
       "metrics": {
-        "stemApis": [],
-        "orbits": 4,
-        "residualDbfs": -169.13737204383435,
-        "headline": "no stem API"
+        "stemApis": [
+          "supradough.renderDoughStems"
+        ],
+        "orbits": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "stemRms": {
+          "1": 0.011400375815970346,
+          "2": 0.013070353403176077,
+          "3": 0.005092448447371626,
+          "4": 0.001785799028330401
+        },
+        "residualDbfs": -168.85256326154212,
+        "headline": "4 stems, residual -168.9 dBFS"
       },
       "notes": {
-        "skippedModules": [
-          {
-            "module": "@strudel/webaudio",
-            "error": "Cannot find module '/run/media/zajferx/Data/dev/The-No-hands-Company/projects/Testing/StrudelLang/packages/superdough/ola-processor' imported from /run/media/zajferx/Data/dev/The-No-hands-Company/projects/Testing/StrudelLang/packages/superdough/worklets.mjs"
-          }
-        ],
-        "feasibility": "per-orbit renders sum to the mix at -169.13737204383435 dBFS",
-        "error": "no stem export API"
+        "reference": "renderDough render of the same pattern",
+        "scope": "left channels compared"
       },
       "run": {
-        "ranAt": "2026-09-29T12:17:18.424Z",
-        "commit": "96df6ef6",
+        "ranAt": "2026-10-02T04:40:00.343Z",
+        "commit": "3dc3478e",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
@@ -248,14 +260,14 @@
       "metrics": {
         "events": 1115,
         "audioSeconds": 65,
-        "renderSeconds": 14.858897023999997,
-        "realtimeFactor": 4.374483509443023,
-        "headline": "4.4x real time"
+        "renderSeconds": 15.405560933999999,
+        "realtimeFactor": 4.219255649208158,
+        "headline": "4.2x real time"
       },
       "notes": {},
       "run": {
-        "ranAt": "2026-09-29T12:17:18.424Z",
-        "commit": "96df6ef6",
+        "ranAt": "2026-10-02T04:39:05.857Z",
+        "commit": "3dc3478e",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",

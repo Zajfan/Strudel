@@ -78,7 +78,7 @@ the same commit, never inside a probe.
 | ARR-1 | Long-form song | 64-bar, 8-section piece with a hard ending in one file; renders with the correct section boundaries | req | req | req |
 | MIX-1 | Buses, send, sidechain | 4 buses, one send, one ducked bus; ducking depth ≥ 6 dB measured on the output | req | req | req |
 | AUT-1 | Automation precision | Parameter ramp timing error < 1 ms at 48 kHz | req | req | req |
-| EXP-1 | Offline render | Reference song renders to WAV: non-silent (RMS ≥ 0.001; minRms applies to CLI and browser), correct length, byte-identical across two runs | req | req | req |
+| EXP-1 | Offline render | Reference song renders to WAV: non-silent (RMS ≥ 0.001; minRms applies to CLI and browser), correct length, byte-identical across two runs (browser, since 2026-10-02: within -60 dBFS, because Chromium sums node inputs in a varying order; measured -81.5 dBFS) | req | req | req |
 | EXP-2 | Stems | One WAV per bus; the stems sum to the mix within −60 dBFS residual | opt | req | req |
 | PERF-1 | Voice capacity | Sustained polyphony (saw + filter + envelope) for 60 s with 0 late starts: Browser ≥ 64, Desktop ≥ 256; CLI renders the reference song ≥ 4× real time | req | req | req |
 | LIVE-1 | Safe live swap | A failing evaluation mid-playback causes no audio gap > 1 render quantum (128 frames); the previous pattern continues | req | req | n/a |

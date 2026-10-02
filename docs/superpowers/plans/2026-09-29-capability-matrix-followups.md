@@ -8,10 +8,12 @@ None blocked the merge; each names where it should be fixed.
   that sizes the render buffer, so it cannot fail, and no WAV is encoded. When
   determinism is fixed, EXP-1 would pass without checking these. Encode a WAV,
   compare WAV bytes, and check the length independently of `renderPattern`.
+  - **Done 2026-10-02:** both probes now check an encoded WAV. CLI: `encodeWav` (`packages/supradough/render.mjs`) encodes both renders, the WAV files must be byte-identical, and the length is read from the WAV header. Browser: the WAV blob `renderPatternAudio` hands to the download link is captured; its header must say 2 ch at 48 kHz with the song's length, and the file size must match the header.
 - **EXP-1 non-determinism** comes from `Math.random()` in the supradough noise
   generators (`packages/supradough/dough.mjs:196-228`) and supersaw phase init (`:103`)
   on the CLI, and in superdough's noise buffers (`packages/superdough/noise.mjs`) in the
   browser. The error message names supersaw, but the reference song only uses noise.
+  - **Done 2026-10-02:** supradough takes a seed (`new Dough(sampleRate, currentTime, seed)`), and offline renders are seeded, so the CLI render is byte-identical. The browser difference was not randomness: Chromium sums a node's inputs in an order that can change between renders (shown with three plain OscillatorNodes into one GainNode), so float sums differ by up to -81.5 dBFS on the reference song. Browser EXP-1 now requires renders to match within -60 dBFS (agreed 2026-10-02); superdough's `Math.random()` uses (noise buffers, reverb IR, supersaw/wavetable phase) are not seeded yet.
 
 ## Before PERF-1 is trusted
 - PERF-1 times only the DSP loop, in one cold run. Results so far: 4.5x, then 3.93x,
@@ -43,6 +45,7 @@ None blocked the merge; each names where it should be fixed.
   limit lives) is not checked.
 - EXP-2 feasibility wording: the stem pattern has no shared bus effects (delay, reverb on a
   bus), so "stems sum to the mix" is shown only for dry orbits.
+  - **Done 2026-10-02:** the stem pattern now has a delay on orbit 2, and both stem APIs are exercised against a separate mix render.
 - PLUG-1: `eventsDelivered` is a host-side count, not an acknowledgement from the plugin;
   RMS is not correlated with the note windows; a cargo timeout does not kill the
   `clap-host` child; the spike hand-rolls its JSON output although `serde_json` is a dependency.
@@ -71,6 +74,7 @@ Full three-tier run, all cells re-measured this date after the final-review fixe
 - **EXP-1 (cli, browser: fail):** non-deterministic. Two renders of the same pattern first differ at sample 1 on both tiers. On the CLI the cause is `Math.random()` in the supradough noise generators (`packages/supradough/dough.mjs:196-228`; the supersaw phase init at `:103` is not used by the reference song). In the browser it is `Math.random()` in superdough's noise buffers (`packages/superdough/noise.mjs`).
 - **EXP-1 (desktop: not-run):** no probe yet.
 - **EXP-2 (cli, browser: fail, opt in browser):** no stem export API exists (names are matched as the word "stem"/"stems", so `system…` no longer counts; an API that is found but not driven by the probe is `not-run`, never `pass`). Feasibility check: summing the per-orbit renders reproduces the full mix to within -169 dBFS residual, so stems are achievable once an export API exists — this is a missing-API gap, not an engine limitation.
+  - **Fixed 2026-10-02 (cli, browser: pass).** Browser: `renderPatternStems` (`packages/webaudio/webaudio.mjs`) renders once into an OfflineAudioContext with 2 channels per orbit (multiChannelOrbits routing), and splits it into one stereo stem per orbit (1 to 16) plus their sum; `exportPatternStems` downloads them as one zip (fflate, stored); the Export tab has a "Stems" option. CLI: supradough now has one delay per orbit (it had one delay shared by all orbits, using the settings of whichever voice was updated last) and `renderDoughStems` reads every orbit's output in one pass. Residuals against a separate mix render: -154.6 dBFS (browser), -168.9 dBFS (CLI). The per-orbit buses cost about 2.5% render speed (CLI PERF-1 4.2x, limit 4x).
 - **EXP-2 (desktop: not-run):** no probe yet.
 
 ### Sub-project 5 — Instrument depth (TUNE)

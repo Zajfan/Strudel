@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { firstByteDifference, rms } from '../lib/audio.mjs';
+import { firstByteDifference, parseWavHeader, rms } from '../lib/audio.mjs';
 
 describe('rms', () => {
   it('is 0 for silence and 1 for a full-scale square', () => {
@@ -23,5 +23,17 @@ describe('firstByteDifference', () => {
   });
   it('returns 0 when lengths differ', () => {
     expect(firstByteDifference(new Float32Array(2), new Float32Array(3))).toBe(0);
+  });
+});
+
+describe('parseWavHeader', () => {
+  it('reads the format and frame count of a WAV written by encodeWav', async () => {
+    const { encodeWav } = await import('../../../packages/supradough/render.mjs');
+    const wav = encodeWav([new Float32Array(10), new Float32Array(10)], 44100);
+    expect(parseWavHeader(wav)).toEqual({ format: 1, channels: 2, sampleRate: 44100, bitsPerSample: 16, dataBytes: 40, frames: 10 });
+  });
+  it('rejects bytes that are not a canonical WAV', () => {
+    expect(parseWavHeader(new Uint8Array(44))).toBeNull();
+    expect(parseWavHeader(new Uint8Array(3))).toBeNull();
   });
 });

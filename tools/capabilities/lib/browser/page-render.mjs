@@ -1,5 +1,6 @@
 // Renders a pattern offline inside the REPL page through the page's own renderPatternAudio, and
 // hands the left channel back to Node. The builder must use page globals only (it is sent as source).
+import { parseWavHeader } from '../audio.mjs';
 import { decodeFloat32 } from '../measure.mjs';
 import { withMiniStrings } from './page-scope.mjs';
 
@@ -16,8 +17,14 @@ async function renderInPageScript({ builderSource, cps, cycles, sampleRate, samp
   const anchorProto = HTMLAnchorElement.prototype;
   const originalStartRendering = renderProto.startRendering;
   const originalClick = anchorProto.click;
+  const originalCreateObjectURL = URL.createObjectURL;
   let rendering = null;
   let suppressedDownloads = 0;
+  let downloaded = null; // the Blob handed to the download link: the WAV file the user would get
+  URL.createObjectURL = function (obj) {
+    downloaded = obj;
+    return originalCreateObjectURL.call(this, obj);
+  };
   renderProto.startRendering = function (...args) {
     const p = originalStartRendering.apply(this, args);
     rendering = p;
@@ -38,6 +45,14 @@ async function renderInPageScript({ builderSource, cps, cycles, sampleRate, samp
   } finally {
     renderProto.startRendering = originalStartRendering;
     anchorProto.click = originalClick;
+    URL.createObjectURL = originalCreateObjectURL;
+  }
+  let wavHeader = null;
+  let wavBytes = null;
+  if (downloaded instanceof Blob) {
+    const head = new Uint8Array(await downloaded.slice(0, 44).arrayBuffer());
+    wavHeader = btoa(String.fromCharCode(...head));
+    wavBytes = downloaded.size;
   }
 
   const left = buffer.getChannelData(0);
@@ -65,11 +80,15 @@ async function renderInPageScript({ builderSource, cps, cycles, sampleRate, samp
     events,
     hash: hash.toString(16).padStart(8, '0'),
     suppressedDownloads,
+    wavHeader,
+    wavBytes,
   };
 }
 
 // renderInPage(page, builderFn, { cps, cycles, sampleRate }) → { left, length, sampleRate, hash }, plus
-// channels, events (onset haps in [0, cycles)) and suppressedDownloads for diagnostics.
+// channels, events (onset haps in [0, cycles)) and suppressedDownloads for diagnostics, and `wav`:
+// the parsed header of the WAV file renderPatternAudio offered for download (null if none), with
+// its size in bytes.
 // `samples: false` skips transferring the audio (left is null); the hash is always computed in the page.
 export async function renderInPage(page, builderFn, { cps, cycles, sampleRate = 48000, samples = true, timeoutMs } = {}) {
   const out = await withMiniStrings(page, () =>
@@ -88,5 +107,6 @@ export async function renderInPage(page, builderFn, { cps, cycles, sampleRate = 
     channels: out.channels,
     events: out.events,
     suppressedDownloads: out.suppressedDownloads,
+    wav: out.wavHeader == null ? null : { ...parseWavHeader(Buffer.from(out.wavHeader, 'base64')), fileBytes: out.wavBytes },
   };
 }

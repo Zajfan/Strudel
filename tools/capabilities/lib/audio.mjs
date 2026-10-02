@@ -16,3 +16,20 @@ export function firstByteDifference(a, b) {
   }
   return -1;
 }
+
+// Reads the format of a canonical 44-byte-header WAV file (RIFF, one 'fmt ' chunk of 16 bytes, then
+// 'data'), as written by supradough's encodeWav and superdough's audioBufferToWav. Returns null for
+// anything else. `frames` comes from the data chunk's size, so it is the length the file claims.
+export function parseWavHeader(bytes) {
+  if (!bytes || bytes.length < 44) return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const text = (offset) => String.fromCharCode(...bytes.subarray(offset, offset + 4));
+  if (text(0) !== 'RIFF' || text(8) !== 'WAVE' || text(12) !== 'fmt ' || text(36) !== 'data') return null;
+  const format = view.getUint16(20, true);
+  const channels = view.getUint16(22, true);
+  const sampleRate = view.getUint32(24, true);
+  const bitsPerSample = view.getUint16(34, true);
+  const dataBytes = view.getUint32(40, true);
+  const frames = dataBytes / (channels * (bitsPerSample / 8));
+  return { format, channels, sampleRate, bitsPerSample, dataBytes, frames };
+}

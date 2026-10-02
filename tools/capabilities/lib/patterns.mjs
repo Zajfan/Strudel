@@ -72,7 +72,8 @@ export function duckPattern() {
 export function stemPattern() {
   return stack(
     note(48).s('sine').orbit(1).gain(0.3),
-    note(67).s('triangle').orbit(2).gain(0.3).fast(2),
+    // an orbit effect, which must stay in its orbit's stem
+    note(67).s('triangle').orbit(2).gain(0.3).fast(2).delay(0.5),
     note(72).s('sine').orbit(3).gain(0.2).fast(4),
     note(55).s('square').orbit(4).gain(0.1),
   );
