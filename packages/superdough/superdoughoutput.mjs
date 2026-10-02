@@ -7,7 +7,7 @@ Copyright (C) 2025 Strudel contributors - see <https://codeberg.org/uzu/strudel/
 This program is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version. This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Affero General Public License for more details. You should have received a copy of the GNU Affero General Public License along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-import { effectSend, getWorklet, webAudioTimeout } from './helpers.mjs';
+import { effectSend, getWorklet } from './helpers.mjs';
 import { errorLogger } from './logger.mjs';
 import { clamp } from './util.mjs';
 
@@ -99,29 +99,45 @@ export class Orbit {
     return effectSend(node, this.delayNode, amount);
   }
 
+  // The orbit's duck envelope, as last scheduled (see duck). Kept here because an AudioParam can't
+  // report the value it will have at a future time.
+  duckEnvelope = null;
+
+  // gain of the orbit output at time t, according to duckEnvelope
+  duckGainAt(t) {
+    const env = this.duckEnvelope;
+    if (!env || t >= env.end) {
+      return 1;
+    }
+    if (t <= env.start) {
+      return env.from;
+    }
+    if (t < env.bottom) {
+      return env.from * Math.pow(env.level / env.from, (t - env.start) / (env.bottom - env.start));
+    }
+    return env.level * Math.pow(1 / env.level, (t - env.bottom) / (env.end - env.bottom));
+  }
+
   duck(t, onsettime = 0, attacktime = 0.1, depth = 1) {
     const onset = onsettime;
     const attack = Math.max(attacktime, 0.002);
     const gainParam = this.output.gain;
-    webAudioTimeout(
-      this.audioContext,
-      () => {
-        const now = this.audioContext.currentTime;
-
-        // cancelScheduledValues and setValueAtTime together emulate cancelAndHoldAtTime
-        // on browsers which lack that method
-        const currVal = gainParam.value;
-        gainParam.cancelScheduledValues(now);
-        gainParam.setValueAtTime(currVal, now);
-
-        const t0 = Math.max(t, now); // guard against now > t
-        const duckedVal = clamp(1 - Math.sqrt(depth), 0.01, currVal);
-        gainParam.exponentialRampToValueAtTime(duckedVal, t0 + onset);
-        gainParam.exponentialRampToValueAtTime(1, t0 + onset + attack);
-      },
-      0,
-      t - 0.01,
-    );
+    // Scheduled on the audio clock right away, so the duck lands exactly at t, also in offline
+    // renders (a main-thread timeout would fire wherever the render happens to be).
+    const t0 = Math.max(t, this.audioContext.currentTime);
+    const from = this.duckGainAt(t0);
+    const level = clamp(1 - Math.sqrt(depth), 0.01, 1);
+    gainParam.cancelScheduledValues(t0);
+    // a ramp, not a jump: if an earlier duck is still under way, cancelling dropped its next event,
+    // and ramping from its last remaining event to `from` continues the same exponential curve
+    gainParam.exponentialRampToValueAtTime(from, t0);
+    if (onset > 0) {
+      gainParam.exponentialRampToValueAtTime(level, t0 + onset);
+    } else {
+      gainParam.setValueAtTime(level, t0);
+    }
+    gainParam.exponentialRampToValueAtTime(1, t0 + onset + attack);
+    this.duckEnvelope = { start: t0, from, level, bottom: t0 + onset, end: t0 + onset + attack };
   }
 
   connectToOutput(node) {
@@ -211,7 +227,8 @@ export class SuperdoughAudioController {
         return;
       }
       const onset = onsetArr[idx] ?? onsetArr[0];
-      const attack = Math.max(attackArr[idx] ?? attackArr[0], 0.002);
+      // undefined means the default; Math.max(undefined, ...) would be NaN
+      const attack = Math.max(attackArr[idx] ?? attackArr[0] ?? 0.1, 0.002);
       const depth = depthArr[idx] ?? depthArr[0];
 
       orbit.duck(t, onset, attack, depth);

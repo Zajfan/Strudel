@@ -1046,6 +1046,36 @@ class DoughOrbit {
   delayspeed = getDefaultValue('delayspeed');
   delayL = new Delay();
   delayR = new Delay();
+  // sidechain ducking of the orbit's output, as in superdough: an exponential ramp from the current
+  // gain down to `level` over `onset` samples, then back up to 1 over `attack` samples
+  gain = 1;
+  duckFrom = 1;
+  duckLevel = 1;
+  duckOnset = 0;
+  duckAttack = 0;
+  duckElapsed = -1; // samples since the duck started, -1 when not ducking
+  duck(onsetSeconds = 0, attackSeconds = 0.1, depth = 1, sampleRate = SAMPLE_RATE) {
+    this.duckFrom = this.gain;
+    this.duckLevel = clamp(1 - Math.sqrt(depth ?? 1), 0.01, 1);
+    this.duckOnset = Math.max(0, Math.round((onsetSeconds ?? 0) * sampleRate));
+    this.duckAttack = Math.max(1, Math.round(Math.max(attackSeconds ?? 0.1, 0.002) * sampleRate));
+    this.duckElapsed = 0;
+  }
+  updateGain() {
+    if (this.duckElapsed < 0) {
+      return this.gain;
+    }
+    const e = this.duckElapsed++;
+    if (e < this.duckOnset) {
+      this.gain = this.duckFrom * Math.pow(this.duckLevel / this.duckFrom, (e + 1) / this.duckOnset);
+    } else if (e < this.duckOnset + this.duckAttack) {
+      this.gain = this.duckLevel * Math.pow(1 / this.duckLevel, (e - this.duckOnset + 1) / this.duckAttack);
+    } else {
+      this.gain = 1;
+      this.duckElapsed = -1;
+    }
+    return this.gain;
+  }
 }
 
 export class Dough {
@@ -1091,6 +1121,13 @@ export class Dough {
     this.schedule({ time, type: 'spawn', arg: value });
   }
   spawn(value) {
+    if (value.duckorbit != null) {
+      // like superdough: several targets may share or each have their own onset, attack and depth
+      const at = (param, i) => [param].flat()[i] ?? [param].flat()[0];
+      [value.duckorbit].flat().forEach((target, i) => {
+        this.getOrbit(target).duck(at(value.duckonset, i), at(value.duckattack, i), at(value.duckdepth, i), this.sampleRate);
+      });
+    }
     value.id = this.vid++;
     const voice = new DoughVoice(value);
     voice.bus = this.getOrbit(voice.orbit); // looked up once, not per sample
@@ -1162,6 +1199,9 @@ export class Dough {
       bus.send[1] = delayR * bus.delayfeedback;
       bus.out[0] += delayL;
       bus.out[1] += delayR;
+      const gain = bus.updateGain();
+      bus.out[0] *= gain;
+      bus.out[1] *= gain;
       this.out[0] += bus.out[0];
       this.out[1] += bus.out[1];
     }
