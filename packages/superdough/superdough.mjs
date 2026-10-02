@@ -274,6 +274,7 @@ export async function initAudio(options = {}) {
     disableWorklets = false,
     maxPolyphony,
     audioDeviceName = DEFAULT_AUDIO_DEVICE_NAME,
+    cueDeviceName = DEFAULT_AUDIO_DEVICE_NAME,
     multiChannelOrbits = false,
   } = options;
 
@@ -299,6 +300,14 @@ export async function initAudio(options = {}) {
       );
     } catch {
       logger('[superdough] failed to set audio interface', 'warning');
+    }
+  }
+  if (cueDeviceName != null && cueDeviceName != DEFAULT_AUDIO_DEVICE_NAME && !(audioCtx instanceof OfflineAudioContext)) {
+    try {
+      await setCueDevice(cueDeviceName);
+      logger(`[superdough] Cue device set to ${cueDeviceName}`);
+    } catch {
+      logger('[superdough] failed to set the cue device', 'warning');
     }
   }
   if ((!audioCtx) instanceof OfflineAudioContext) {
@@ -342,6 +351,16 @@ export function getSuperdoughAudioController() {
 export function setSuperdoughAudioController(newController) {
   controller = newController;
   return controller;
+}
+
+// Chooses the output device of the cue (patterns with `cue`), by its name as getAudioDevices lists
+// it; DEFAULT_AUDIO_DEVICE_NAME (or an unknown name) is the system default.
+export async function setCueDevice(deviceName) {
+  let id = '';
+  if (deviceName != null && deviceName !== DEFAULT_AUDIO_DEVICE_NAME) {
+    id = (await getAudioDevices()).get(deviceName) ?? '';
+  }
+  await getSuperdoughAudioController().setCueDevice(id);
 }
 
 export function connectToDestination(input, channels) {
@@ -518,6 +537,7 @@ export const superdough = async (value, t, hapDuration, cps = 0.5, cycle = 0.5) 
     delaysync = getDefaultValue('delaysync'),
     delaytime,
     orbit = getDefaultValue('orbit'),
+    cue,
     bus,
     busgain = getDefaultValue('busgain'),
     room,
@@ -542,7 +562,11 @@ export const superdough = async (value, t, hapDuration, cps = 0.5, cycle = 0.5) 
   );
 
   const channels = value.channels != null ? mapChannelNumbers(value.channels) : orbitChannels;
-  const orbitBus = audioController.getOrbit(orbit, channels);
+  if (cue && ac instanceof OfflineAudioContext) {
+    // the cue is for listening on headphones, not part of the mix: leave it out of renders
+    return;
+  }
+  const orbitBus = audioController.getOrbit(orbit, channels, !!cue);
   if (duckorbit != null) {
     audioController.duck(duckorbit, t, duckonset, duckattack, duckdepth);
   }

@@ -6,7 +6,7 @@ import { ButtonGroup } from './Forms.jsx';
 import { AudioDeviceSelector } from './AudioDeviceSelector.jsx';
 import { AudioEngineTargetSelector } from './AudioEngineTargetSelector.jsx';
 import { confirmDialog } from '../../util.mjs';
-import { DEFAULT_MAX_POLYPHONY, setMaxPolyphony, setMultiChannelOrbits } from '@strudel/webaudio';
+import { DEFAULT_MAX_POLYPHONY, setCueDevice, setMaxPolyphony, setMultiChannelOrbits } from '@strudel/webaudio';
 import { ActionButton } from '../button/action-button.jsx';
 import { exportScript, ImportPrebakeScriptButton } from './ImportPrebakeScriptButton.jsx';
 import { useEffect, useRef } from 'react';
@@ -141,6 +141,7 @@ function MainSettingsContent({ started }) {
     fontFamily,
     panelPosition,
     audioDeviceName,
+    cueDeviceName,
     audioEngineTarget,
     maxPolyphony,
     multiChannelOrbits,
@@ -162,6 +163,18 @@ function MainSettingsContent({ started }) {
               confirmAndReloadPage(() => {
                 settingsMap.setKey('audioDeviceName', audioDeviceName);
               });
+            }}
+          />
+        </FormItem>
+      )}
+      {canChangeAudioDevice && (
+        <FormItem label="Cue (Headphone) Output Device">
+          <AudioDeviceSelector
+            audioDeviceName={cueDeviceName}
+            onChange={(cueDeviceName) => {
+              // takes effect right away, no reload needed: patterns with .cue() play here
+              settingsMap.setKey('cueDeviceName', cueDeviceName);
+              setCueDevice(cueDeviceName).catch((err) => console.warn('could not set the cue device', err));
             }}
           />
         </FormItem>

@@ -2222,6 +2222,25 @@ export const { octave, oct } = registerControl('octave', 'oct');
 export const { orbit } = registerControl('orbit', 'o');
 
 /**
+ * Sends the pattern to the cue (headphone) output instead of the main output, like the cue button on
+ * a DJ mixer: you hear it, the audience doesn't. The cue output device is chosen in the settings
+ * (or with `setCueDevice`). With no argument, cue is on; `cue(0)` turns it off. Cued patterns get
+ * their own orbit effects, and are left out of exported audio.
+ *
+ * @name cue
+ * @tags superdough
+ * @param {number | Pattern} [on] 1 (the default) to cue, 0 for the main output
+ * @example
+ * $: s("bd*4, hh*8")
+ * $: note("<c3 eb3 g3 bb3>").s("sawtooth").lpf(800).cue()
+ */
+export const { cue } = registerControl('cue');
+const cueControl = Pattern.prototype.cue;
+Pattern.prototype.cue = function (...args) {
+  return cueControl.call(this, ...(args.length ? args : [1]));
+};
+
+/**
  * A `bus` is a send which can be used for mixing patterns. It combines with..
  *   s("bus") to play that bus through another pattern (for, say, applying non-linear
  *   effects like distortion to multiple signals)

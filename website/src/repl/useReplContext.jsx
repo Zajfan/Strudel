@@ -41,13 +41,14 @@ import { setInterval, clearInterval } from 'worker-timers';
 import { getMetadata } from '../metadata_parser';
 import { debugAudiograph } from './audiograph';
 
-const { latestCode, maxPolyphony, audioDeviceName, multiChannelOrbits } = settingsMap.get();
+const { latestCode, maxPolyphony, audioDeviceName, cueDeviceName, multiChannelOrbits } = settingsMap.get();
 let modulesLoading, presets, drawContext, clearCanvas, audioReady;
 
 if (typeof window !== 'undefined') {
   audioReady = initAudioOnFirstClick({
     maxPolyphony,
     audioDeviceName,
+    cueDeviceName,
     multiChannelOrbits: parseBoolean(multiChannelOrbits),
   });
   modulesLoading = loadModules();
@@ -238,11 +239,12 @@ export function useReplContext() {
         ? exportPatternStems(pattern, cps, begin, end, sampleRate, maxPolyphony, downloadName)
         : renderPatternAudio(pattern, cps, begin, end, sampleRate, maxPolyphony, multiChannelOrbits, downloadName)
     ).finally(async () => {
-      const { latestCode, maxPolyphony, audioDeviceName, multiChannelOrbits } = settingsMap.get();
+      const { latestCode, maxPolyphony, audioDeviceName, cueDeviceName, multiChannelOrbits } = settingsMap.get();
       await initAudio({
         latestCode,
         maxPolyphony,
         audioDeviceName,
+        cueDeviceName,
         multiChannelOrbits,
       });
       editorRef.current.repl.scheduler.stop();

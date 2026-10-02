@@ -190,11 +190,38 @@ export class SuperdoughOutput {
   };
 }
 
+// The cue (headphone) output: a second output device for patterns with `cue`, inaudible on the
+// main output. An AudioContext has one output device, so the cue mix leaves the context as a
+// MediaStream and plays through an <audio> element, whose own device is set with setSinkId.
+export class CueOutput {
+  constructor(audioContext) {
+    this.destination = audioContext.createMediaStreamDestination();
+    this.audio = new Audio();
+    this.audio.srcObject = this.destination.stream;
+    this.audio.play().catch((err) => errorLogger(new Error(`cue output could not start: ${err.message}`), 'superdough'));
+  }
+  // deviceId '' is the system default
+  async setDevice(deviceId) {
+    if (typeof this.audio.setSinkId !== 'function') {
+      throw new Error('this browser cannot choose an output device for the cue');
+    }
+    await this.audio.setSinkId(deviceId);
+  }
+  disconnect() {
+    this.audio.pause();
+    this.audio.srcObject = null;
+    this.destination.disconnect();
+  }
+}
+
 export class SuperdoughAudioController {
   audioContext;
   output;
   nodes = {};
+  cueNodes = {}; // orbits of cued patterns, connected to the cue output
   buses = {};
+  cueOutput; // created when the first cued sound plays
+  cueDeviceId = '';
 
   constructor(audioContext) {
     this.audioContext = audioContext;
@@ -208,9 +235,28 @@ export class SuperdoughAudioController {
     Object.values(this.buses).forEach((bus) => {
       bus.disconnect();
     });
+    Object.values(this.cueNodes).forEach((node) => {
+      node.disconnect();
+    });
     this.nodes = {};
+    this.cueNodes = {};
     this.buses = {};
     this.output.reset();
+  }
+
+  getCueOutput() {
+    if (this.cueOutput == null) {
+      this.cueOutput = new CueOutput(this.audioContext);
+      if (this.cueDeviceId) {
+        this.cueOutput.setDevice(this.cueDeviceId).catch((err) => errorLogger(err, 'superdough'));
+      }
+    }
+    return this.cueOutput;
+  }
+
+  async setCueDevice(deviceId) {
+    this.cueDeviceId = deviceId;
+    await this.cueOutput?.setDevice(deviceId);
   }
 
   duck(targetOrbits, t, onsettime = 0, attacktime = 0.1, depth = 1) {
@@ -235,7 +281,14 @@ export class SuperdoughAudioController {
     });
   }
 
-  getOrbit(orbitNum, channels) {
+  getOrbit(orbitNum, channels, cue = false) {
+    if (cue) {
+      if (this.cueNodes[orbitNum] == null) {
+        this.cueNodes[orbitNum] = new Orbit(this.audioContext);
+        this.cueNodes[orbitNum].output.connect(this.getCueOutput().destination);
+      }
+      return this.cueNodes[orbitNum];
+    }
     if (this.nodes[orbitNum] == null) {
       this.nodes[orbitNum] = new Orbit(this.audioContext);
       this.output.connectToDestination(this.nodes[orbitNum].output, channels);
