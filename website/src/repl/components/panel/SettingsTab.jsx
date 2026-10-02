@@ -142,6 +142,7 @@ function MainSettingsContent({ started }) {
     panelPosition,
     audioDeviceName,
     cueDeviceName,
+    pluginDeviceName,
     audioEngineTarget,
     maxPolyphony,
     multiChannelOrbits,
@@ -176,6 +177,21 @@ function MainSettingsContent({ started }) {
               // takes effect right away, no reload needed: patterns with .cue() play here
               settingsMap.setKey('cueDeviceName', cueDeviceName);
               setCueDevice(cueDeviceName).catch((err) => console.warn('could not set the cue device', err));
+            }}
+          />
+        </FormItem>
+      )}
+      {typeof window !== 'undefined' && window.__TAURI_INTERNALS__ && (
+        <FormItem label="Plugin Output Device">
+          <AudioDeviceSelector
+            audioDeviceName={pluginDeviceName}
+            getDevices={getCueDevices}
+            onChange={(pluginDeviceName) => {
+              // takes effect right away: the plugin engine moves there with its plugins
+              settingsMap.setKey('pluginDeviceName', pluginDeviceName);
+              import('@strudel/desktopbridge/clap.mjs')
+                .then(({ setPluginDevice }) => setPluginDevice(pluginDeviceName))
+                .catch((err) => console.warn('could not set the plugin device', err));
             }}
           />
         </FormItem>

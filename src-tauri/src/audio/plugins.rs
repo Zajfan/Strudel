@@ -161,18 +161,28 @@ fn find_plugin(name: &str) -> Result<PathBuf, String> {
     .ok_or_else(|| format!("no CLAP plugin \"{}\". Found: {}", name, plugin_names().join(", ")))
 }
 
-// A plugin activated on its host thread, ready for the audio thread.
+// A plugin activated on its host thread, ready for the audio thread. When it is removed, the audio
+// thread stops its processor and sends it back through `retire`, so the host thread can deactivate
+// the plugin (CLAP: on its main thread) and unload it.
 struct NewSlot {
   index: usize,
   processor: StoppedPluginAudioProcessor<Host>,
   layout: Layout,
+  retire: Sender<StoppedPluginAudioProcessor<Host>>,
+}
+
+// what the audio thread is asked to do with its plugins
+enum AudioCommand {
+  Add(NewSlot),
+  Remove(usize),
 }
 
 // Loads the plugin on a new host thread, which keeps servicing it; returns its activated processor.
-fn load_plugin(name: &str, index: usize, sample_rate: f64) -> Result<NewSlot, String> {
+fn load_plugin(name: &str, index: usize, sample_rate: f64) -> Result<(NewSlot, std::thread::JoinHandle<()>), String> {
   let path = find_plugin(name)?;
   let (ready, loaded) = channel::<Result<NewSlot, String>>();
-  std::thread::spawn(move || {
+  let (retire, retired) = channel::<StoppedPluginAudioProcessor<Host>>();
+  let thread = std::thread::spawn(move || {
     let result = (|| -> Result<(PluginEntry, PluginInstance<Host>, NewSlot), String> {
       let host_info = HostInfo::new("Strudel", "Strudel", "https://strudel.cc", "0.1.0").map_err(|e| e.to_string())?;
       let path = std::fs::canonicalize(&path).map_err(|e| e.to_string())?;
@@ -188,25 +198,35 @@ fn load_plugin(name: &str, index: usize, sample_rate: f64) -> Result<NewSlot, St
       let layout = layout(&mut instance)?;
       let config = PluginAudioConfiguration { sample_rate, min_frames_count: 1, max_frames_count: BLOCK as u32 };
       let processor = instance.activate(|_, _| (), config).map_err(|e| e.to_string())?;
-      Ok((entry, instance, NewSlot { index, processor, layout }))
+      Ok((entry, instance, NewSlot { index, processor, layout, retire }))
     })();
     match result {
       Err(err) => {
         let _ = ready.send(Err(err));
       }
-      Ok((_entry, mut instance, slot)) => {
+      Ok((entry, mut instance, slot)) => {
         let _ = ready.send(Ok(slot));
-        // the plugin's main thread, for as long as the app runs
+        // the plugin's main thread, until the audio thread hands its processor back
         loop {
           if instance.access_shared_handler(|s| s.callback_requested.swap(false, Ordering::SeqCst)) {
             instance.call_on_main_thread_callback();
           }
-          std::thread::sleep(Duration::from_millis(5));
+          match retired.recv_timeout(Duration::from_millis(5)) {
+            Ok(stopped) => {
+              instance.deactivate(stopped);
+              break;
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            // the processor was dropped with the audio stream: nothing left to deactivate
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+          }
         }
+        drop(instance);
+        drop(entry);
       }
     }
   });
-  loaded.recv().map_err(|e| e.to_string())?
+  Ok((loaded.recv().map_err(|e| e.to_string())??, thread))
 }
 
 // ------------------------------------------------------------------ audio side
@@ -223,6 +243,7 @@ struct NoteEvent {
 struct Slot {
   index: usize,
   processor: StartedPluginAudioProcessor<Host>,
+  retire: Sender<StoppedPluginAudioProcessor<Host>>,
   layout: Layout,
   in_bufs: Vec<Vec<Vec<f32>>>,
   out_bufs: Vec<Vec<Vec<f32>>>,
@@ -246,9 +267,15 @@ impl Slot {
       events_in: EventBuffer::with_capacity(256),
       events_out: EventBuffer::with_capacity(256),
       processor,
+      retire: new.retire,
       layout: new.layout,
       steady: 0,
     })
+  }
+
+  // Stops the plugin's processing and hands the processor back to its host thread.
+  fn retire(self) {
+    let _ = self.retire.send(self.processor.stop_processing());
   }
 
   // Renders n frames with the given (offset, event) notes and adds them into out (interleaved).
@@ -336,13 +363,15 @@ pub struct EngineStats {
 struct Running {
   sample_rate: u32,
   device: String,
-  slots: Producer<NewSlot>,
+  commands: Producer<AudioCommand>,
+  threads: HashMap<usize, std::thread::JoinHandle<()>>,
   events: Producer<NoteEvent>,
   stop: Sender<()>,
   stats: Arc<Stats>,
   capture: Arc<Mutex<Vec<f32>>>,
   capturing: Arc<AtomicBool>,
   plugins: HashMap<String, usize>,
+  next_index: usize,
 }
 
 #[derive(Default)]
@@ -372,7 +401,7 @@ fn epoch_to_instant(time: f64) -> Instant {
 impl PluginEngine {
   pub fn start(&self, device: Option<String>) -> Result<(), String> {
     self.stop();
-    let (slots_tx, mut slots_rx) = RingBuffer::<NewSlot>::new(16);
+    let (commands_tx, mut commands_rx) = RingBuffer::<AudioCommand>::new(64);
     let (events_tx, mut events_rx) = RingBuffer::<NoteEvent>::new(8192);
     let stats = Arc::new(Stats::default());
     let capture = Arc::new(Mutex::new(Vec::new()));
@@ -408,9 +437,19 @@ impl PluginEngine {
             &config,
             move |out: &mut [f32], info: &cpal::OutputCallbackInfo| {
               out.fill(0.0);
-              while let Ok(new) = slots_rx.pop() {
-                if let Ok(slot) = Slot::new(new) {
-                  slots.push(slot);
+              while let Ok(command) = commands_rx.pop() {
+                match command {
+                  AudioCommand::Add(new) => {
+                    if let Ok(slot) = Slot::new(new) {
+                      slots.push(slot);
+                    }
+                  }
+                  AudioCommand::Remove(index) => {
+                    if let Some(i) = slots.iter().position(|s| s.index == index) {
+                      slots.remove(i).retire();
+                    }
+                    pending.retain(|ev| ev.plugin != index);
+                  }
                 }
               }
               while let Ok(ev) = events_rx.pop() {
@@ -483,41 +522,98 @@ impl PluginEngine {
     *self.running.lock().unwrap() = Some(Running {
       sample_rate,
       device,
-      slots: slots_tx,
+      commands: commands_tx,
+      threads: HashMap::new(),
       events: events_tx,
       stop,
       stats,
       capture,
       capturing,
       plugins: HashMap::new(),
+      next_index: 0,
     });
     Ok(())
   }
 
+  // Unloads every plugin (deactivated on its host thread), then closes the stream.
   pub fn stop(&self) {
+    let names: Vec<String> = self.loaded();
+    for name in names {
+      let _ = self.unload(&name);
+    }
     if let Some(running) = self.running.lock().unwrap().take() {
       let _ = running.stop.send(());
     }
   }
 
-  // Plays notes on the named plugin, loading it (and starting the engine on the default device)
-  // first if needed.
-  pub fn play(&self, plugin: &str, notes: Vec<NoteFromJs>) -> Result<(), String> {
+  // the loaded plugins, in load order
+  pub fn loaded(&self) -> Vec<String> {
+    let guard = self.running.lock().unwrap();
+    let Some(r) = guard.as_ref() else {
+      return Vec::new();
+    };
+    let mut plugins: Vec<(&String, &usize)> = r.plugins.iter().collect();
+    plugins.sort_by_key(|(_, i)| **i);
+    plugins.into_iter().map(|(n, _)| n.clone()).collect()
+  }
+
+  // Removes a plugin from the stream and waits (up to 2 s) until its host thread has deactivated it.
+  pub fn unload(&self, plugin: &str) -> Result<(), String> {
+    let thread = {
+      let mut guard = self.running.lock().unwrap();
+      let running = guard.as_mut().ok_or("the plugin engine is not running")?;
+      let index = running.plugins.remove(plugin).ok_or_else(|| format!("\"{}\" is not loaded", plugin))?;
+      running.commands.push(AudioCommand::Remove(index)).map_err(|_| "the audio thread is busy".to_string())?;
+      running.threads.remove(&index)
+    };
+    if let Some(thread) = thread {
+      let deadline = Instant::now() + Duration::from_secs(2);
+      while !thread.is_finished() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(5));
+      }
+      if !thread.is_finished() {
+        return Err(format!("\"{}\" did not unload in time", plugin));
+      }
+    }
+    Ok(())
+  }
+
+  // Moves the engine to another output device, reloading the plugins that were loaded.
+  pub fn set_device(&self, device: Option<String>) -> Result<(), String> {
+    let plugins = self.loaded();
+    self.stop();
+    self.start(device)?;
+    for plugin in plugins {
+      self.load(&plugin)?;
+    }
+    Ok(())
+  }
+
+  // Loads a plugin (once) and returns its index.
+  pub fn load(&self, plugin: &str) -> Result<usize, String> {
     if self.running.lock().unwrap().is_none() {
       self.start(None)?;
     }
     let mut guard = self.running.lock().unwrap();
     let running = guard.as_mut().ok_or("the plugin engine is not running")?;
-    let index = match running.plugins.get(plugin) {
-      Some(&index) => index,
-      None => {
-        let index = running.plugins.len();
-        let slot = load_plugin(plugin, index, running.sample_rate as f64)?;
-        running.slots.push(slot).map_err(|_| "too many plugins".to_string())?;
-        running.plugins.insert(plugin.to_string(), index);
-        index
-      }
-    };
+    if let Some(&index) = running.plugins.get(plugin) {
+      return Ok(index);
+    }
+    let index = running.next_index;
+    running.next_index += 1;
+    let (slot, thread) = load_plugin(plugin, index, running.sample_rate as f64)?;
+    running.commands.push(AudioCommand::Add(slot)).map_err(|_| "the audio thread is busy".to_string())?;
+    running.plugins.insert(plugin.to_string(), index);
+    running.threads.insert(index, thread);
+    Ok(index)
+  }
+
+  // Plays notes on the named plugin, loading it (and starting the engine on the default device)
+  // first if needed.
+  pub fn play(&self, plugin: &str, notes: Vec<NoteFromJs>) -> Result<(), String> {
+    let index = self.load(plugin)?;
+    let mut guard = self.running.lock().unwrap();
+    let running = guard.as_mut().ok_or("the plugin engine is not running")?;
     for note in notes {
       let due = epoch_to_instant(note.time);
       let off = epoch_to_instant(note.time + note.duration);
@@ -606,5 +702,30 @@ mod tests {
     assert_eq!(stats.notes, 3);
     let rms = (captured.iter().map(|s| s * s).sum::<f32>() / captured.len().max(1) as f32).sqrt();
     assert!(rms > 0.001, "rms {}", rms);
+  }
+
+  #[test]
+  fn unloads_plugins_and_moves_them_to_another_device() {
+    if find_plugin("Surge XT").is_err() || !std::path::Path::new("/usr/share/alsa/alsa.conf").exists() {
+      println!("Surge XT or ALSA missing, skipping");
+      return;
+    }
+    std::env::set_var("ALSA_CONFIG_PATH", crate::audio::cue::tests::silent_alsa_config());
+    let engine = PluginEngine::default();
+    engine.start(Some("strudel_null".to_string())).unwrap();
+    engine.load("Surge XT").unwrap();
+    assert_eq!(engine.loaded(), vec!["Surge XT".to_string()]);
+    // a device change keeps the plugins
+    engine.set_device(Some("strudel_null".to_string())).unwrap();
+    assert_eq!(engine.loaded(), vec!["Surge XT".to_string()]);
+    std::thread::sleep(Duration::from_millis(100));
+    assert_eq!(engine.running.lock().unwrap().as_ref().unwrap().stats.plugins.load(Ordering::Relaxed), 1);
+    // unloading deactivates it on its host thread and takes it off the stream
+    engine.unload("Surge XT").unwrap();
+    assert!(engine.loaded().is_empty());
+    std::thread::sleep(Duration::from_millis(100));
+    assert_eq!(engine.running.lock().unwrap().as_ref().unwrap().stats.plugins.load(Ordering::Relaxed), 0);
+    assert!(engine.unload("Surge XT").is_err());
+    engine.stop();
   }
 }

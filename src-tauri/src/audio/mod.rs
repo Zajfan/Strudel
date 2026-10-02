@@ -73,3 +73,19 @@ pub fn engine_stats(engine: State<'_, PluginEngine>) -> EngineStats {
 pub fn engine_capture(start: bool, engine: State<'_, PluginEngine>) -> Response {
   Response::new(engine.capture(start))
 }
+
+// Moves the plugin engine to another output device (None: the default), reloading its plugins.
+#[tauri::command]
+pub fn engine_set_device(device: Option<String>, engine: State<'_, PluginEngine>) -> Result<(), String> {
+  engine.set_device(device)
+}
+
+#[tauri::command]
+pub fn clap_loaded(engine: State<'_, PluginEngine>) -> Vec<String> {
+  engine.loaded()
+}
+
+#[tauri::command]
+pub fn clap_unload(plugin: String, engine: State<'_, PluginEngine>) -> Result<(), String> {
+  engine.unload(&plugin)
+}

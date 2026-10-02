@@ -41,9 +41,10 @@ WebKitGTK (the desktop webview) cannot play to a second output device (no `setSi
 
 ## Not done yet
 
-- The engine plays on the default output device (or the one passed to `engine_start`); there is no
-  setting for it in the UI yet.
-- Plugins are loaded once and stay loaded for the session; no unloading, no plugin GUIs, no
-  parameter automation (`auto`) or effects on plugin audio yet.
+- Done 2026-10-02: a "Plugin Output Device" setting (desktop only; `setPluginDevice`), and unloading
+  (`unloadClap`, `loadedClaps`): the audio thread stops the plugin's processor and hands it back to
+  its host thread, which deactivates and unloads it. A device change unloads all plugins, moves the
+  stream and reloads them.
+- No plugin GUIs, parameter automation (`auto`) or effects on plugin audio yet.
 - Plugin audio and the webview's audio reach the OS mixer separately; their alignment rests on the
   clock bridge (WebKitGTK's output latency is estimated, not reported).

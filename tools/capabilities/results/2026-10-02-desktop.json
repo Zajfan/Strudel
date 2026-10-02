@@ -468,10 +468,12 @@
         "plugins": [
           "Surge XT"
         ],
+        "device": "strudel_null",
+        "loadedAfterUnload": [],
         "notes": 13,
         "lateNotes": 0,
         "expectedNotes": 12,
-        "rms": 0.1011386449877673,
+        "rms": 0.10113987462603946,
         "peak": 0.26691386103630066,
         "capturedSamples": 882000,
         "headline": "Surge XT live: 13 notes, 0 late, rms 0.101"
@@ -481,8 +483,8 @@
         "engine": "native CLAP host in the desktop app, on the silent device strudel_null"
       },
       "run": {
-        "ranAt": "2026-10-02T17:58:05.808Z",
-        "commit": "ad5984f7",
+        "ranAt": "2026-10-02T20:22:57.706Z",
+        "commit": "e89ed659",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",

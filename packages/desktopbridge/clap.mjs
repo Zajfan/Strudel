@@ -33,3 +33,12 @@ Pattern.prototype.clap = function (plugin) {
 
 // the CLAP plugins the desktop app can load, by name
 export const clapPlugins = () => Invoke('clap_plugins');
+
+// Moves the plugin engine to another output device, by name as getCueDevices / cue_devices list it
+// ('System Standard' or nothing: the default device). Loaded plugins are reloaded there.
+export const setPluginDevice = (name) =>
+  Invoke('engine_set_device', { device: name && name !== 'System Standard' ? name : null });
+
+// the plugins currently loaded, and unloading one (it is loaded again on its next note)
+export const loadedClaps = () => Invoke('clap_loaded');
+export const unloadClap = (plugin) => Invoke('clap_unload', { plugin });

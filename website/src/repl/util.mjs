@@ -1,5 +1,5 @@
 import { code2hash, errorLogger, evalScope, hash2code, logger } from '@strudel/core';
-import { settingPatterns } from '../settings.mjs';
+import { settingPatterns, settingsMap } from '../settings.mjs';
 import { setVersionDefaults } from '@strudel/webaudio';
 import { getMetadata } from '../metadata_parser';
 import { isTauri } from '../tauri.mjs';
@@ -101,7 +101,16 @@ export function loadModules() {
     modules = modules.concat([import('@strudel/midi'), import('@strudel/osc')]);
   }
 
-  return evalScope(settingPatterns, ...modules);
+  return evalScope(settingPatterns, ...modules).then((scope) => {
+    // desktop: put the plugin engine on the device chosen in the settings (default: system default)
+    const { pluginDeviceName } = settingsMap.get();
+    if (isTauri() && pluginDeviceName && pluginDeviceName !== 'System Standard') {
+      import('@strudel/desktopbridge/clap.mjs')
+        .then(({ setPluginDevice }) => setPluginDevice(pluginDeviceName))
+        .catch((err) => logger(`[clap] could not use ${pluginDeviceName}: ${err}`, 'error'));
+    }
+    return scope;
+  });
 }
 // confirm dialog is a promise in webkit and a boolean in other browsers... normalize it to be a promise everywhere
 export function confirmDialog(msg) {

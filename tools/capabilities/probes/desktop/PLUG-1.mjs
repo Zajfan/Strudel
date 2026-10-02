@@ -19,7 +19,8 @@ export async function probe({ page, thresholds }) {
       if (!native) return { missing: 'the native engine (not the desktop app)' };
       const plugins = await native.invoke('clap_plugins');
       if (!plugins.includes(plugin)) return { notInstalled: plugins };
-      await native.invoke('engine_start', { device: 'strudel_null' });
+      // the setting's API: moves the engine to the device (and reloads plugins there)
+      await setPluginDevice('strudel_null');
       await native.invoke('engine_capture', { start: true });
       const m = window.strudelMirror;
       try {
@@ -40,7 +41,11 @@ export async function probe({ page, thresholds }) {
         sumSq += s * s;
         peak = Math.max(peak, Math.abs(s));
       }
-      return { stats: await native.invoke('engine_stats'), rms: samples.length ? Math.sqrt(sumSq / samples.length) : 0, peak, samples: samples.length };
+      const stats = await native.invoke('engine_stats');
+      // unloading: the plugin is deactivated and leaves the engine
+      await unloadClap(plugin);
+      const loadedAfterUnload = await loadedClaps();
+      return { stats, loadedAfterUnload, rms: samples.length ? Math.sqrt(sumSq / samples.length) : 0, peak, samples: samples.length };
     },
     { code: CODE, seconds: SECONDS, plugin: PLUGIN },
     { timeoutMs: (SECONDS + 60) * 1000 },
@@ -55,6 +60,8 @@ export async function probe({ page, thresholds }) {
   const expectedNotes = 4 * SECONDS;
   const metrics = {
     plugins: stats.plugins,
+    device: stats.device,
+    loadedAfterUnload: out.loadedAfterUnload,
     notes: stats.notes,
     lateNotes: stats.lateNotes,
     expectedNotes,
@@ -68,5 +75,7 @@ export async function probe({ page, thresholds }) {
   if (!(stats.notes >= expectedNotes - 1)) return fail(`${stats.notes} notes played, expected about ${expectedNotes}`);
   if (stats.lateNotes > 0) return fail(`${stats.lateNotes} notes arrived late`);
   if (!(out.rms >= thresholds.minRms)) return fail(`rms ${out.rms} below ${thresholds.minRms}`);
+  if (stats.device !== 'strudel_null') return fail(`the engine played on ${stats.device}, not the chosen device`);
+  if (out.loadedAfterUnload.length) return fail(`still loaded after unloadClap: ${out.loadedAfterUnload}`);
   return { status: 'pass', metrics, notes };
 }

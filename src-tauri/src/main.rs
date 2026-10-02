@@ -48,7 +48,10 @@ fn main() {
         audio::engine_start,
         audio::clap_play,
         audio::engine_stats,
-        audio::engine_capture
+        audio::engine_capture,
+        audio::engine_set_device,
+        audio::clap_loaded,
+        audio::clap_unload
       ]
     )
     .setup(|app| {
