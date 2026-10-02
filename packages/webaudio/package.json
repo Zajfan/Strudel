@@ -35,6 +35,7 @@
   "dependencies": {
     "@strudel/core": "workspace:*",
     "@strudel/draw": "workspace:*",
+    "fflate": "^0.8.2",
     "superdough": "workspace:*",
     "supradough": "workspace:*"
   },

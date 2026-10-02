@@ -6,6 +6,22 @@ const PI_DIV_SR = Math.PI / SAMPLE_RATE;
 const ISR = 1 / SAMPLE_RATE;
 
 let gainCurveFunc = (val) => Math.pow(val, 2);
+
+// source of randomness for noise and oscillator phases: Math.random, unless a Dough was given a seed,
+// which makes its renders reproducible
+let random = Math.random;
+
+// mulberry32: a small, fast seeded PRNG, uniform in [0, 1)
+function seededRandom(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
 const clamp = (num, min, max) => Math.min(Math.max(num, min), max);
 
 function applyGainCurve(val) {
@@ -100,7 +116,7 @@ export class SupersawOsc {
     this.voices = props.voices ?? 5;
     this.freqspread = props.freqspread ?? 0.2;
     this.panspread = props.panspread ?? 0.4;
-    this.phase = new Float32Array(this.voices).map(() => Math.random());
+    this.phase = new Float32Array(this.voices).map(() => random());
   }
   update(freq) {
     const gain1 = Math.sqrt(1 - this.panspread);
@@ -193,12 +209,12 @@ export class PulzeOsc {
 }
 
 export class Dust {
-  update = (density) => (Math.random() < density * ISR ? Math.random() : 0);
+  update = (density) => (random() < density * ISR ? random() : 0);
 }
 
 export class WhiteNoise {
   update() {
-    return Math.random() * 2 - 1;
+    return random() * 2 - 1;
   }
 }
 
@@ -207,7 +223,7 @@ export class BrownNoise {
     this.out = 0;
   }
   update() {
-    let white = Math.random() * 2 - 1;
+    let white = random() * 2 - 1;
     this.out = (this.out + 0.02 * white) / 1.02;
     return this.out;
   }
@@ -225,7 +241,7 @@ export class PinkNoise {
   }
 
   update() {
-    const white = Math.random() * 2 - 1;
+    const white = random() * 2 - 1;
 
     this.b0 = 0.99886 * this.b0 + white * 0.0555179;
     this.b1 = 0.99332 * this.b1 + white * 0.0750759;
@@ -661,6 +677,8 @@ const note2freq = (note) => {
 export class DoughVoice {
   /** @type {number} */
   id = 0;
+  /** the orbit this voice plays on, set by Dough.spawn */
+  bus = undefined;
   /** @type {number[]} */
   out = [0, 0];
 
@@ -1018,23 +1036,44 @@ export class DoughVoice {
 
 // this class is the interface to the "outer world"
 // it handles spawning and despawning of DoughVoice's
+// An orbit: the sum of its voices plus its own delay, like an orbit in superdough. Keeping orbits
+// apart lets a render hand out one output per orbit (stems) that add up to the mix.
+class DoughOrbit {
+  out = [0, 0];
+  send = [0, 0];
+  delaytime = getDefaultValue('delaytime');
+  delayfeedback = getDefaultValue('delayfeedback');
+  delayspeed = getDefaultValue('delayspeed');
+  delayL = new Delay();
+  delayR = new Delay();
+}
+
 export class Dough {
   voices = []; // DoughVoice[]
   vid = 0;
   q = [];
   out = [0, 0];
-  delaysend = [0, 0];
-  delaytime = getDefaultValue('delaytime');
-  delayfeedback = getDefaultValue('delayfeedback');
-  delayspeed = getDefaultValue('delayspeed');
+  orbits = new Map(); // orbit number -> DoughOrbit, created when a voice first plays on it
+  orbitList = []; // the same DoughOrbits, for iterating in update
   t = 0;
-  // sampleRate: number, currentTime: number (seconds)
-  constructor(sampleRate = 48000, currentTime = 0) {
+  // sampleRate: number, currentTime: number (seconds), seed: number (optional, for reproducible renders;
+  // reseeds the randomness shared by all Doughs in this module)
+  constructor(sampleRate = 48000, currentTime = 0, seed = undefined) {
+    if (seed !== undefined) {
+      random = seededRandom(seed);
+    }
     this.sampleRate = sampleRate;
     this.t = Math.floor(currentTime * sampleRate); // samples
     // console.log('init dough', this.sampleRate, this.t);
-    this._delayL = new Delay();
-    this._delayR = new Delay();
+  }
+  getOrbit(orbit) {
+    let bus = this.orbits.get(orbit);
+    if (!bus) {
+      bus = new DoughOrbit();
+      this.orbits.set(orbit, bus);
+      this.orbitList.push(bus);
+    }
+    return bus;
   }
   loadSample(name, channels, sampleRate) {
     BufferPlayer.samples.set(name, { channels, sampleRate });
@@ -1054,6 +1093,7 @@ export class Dough {
   spawn(value) {
     value.id = this.vid++;
     const voice = new DoughVoice(value);
+    voice.bus = this.getOrbit(voice.orbit); // looked up once, not per sample
     this.voices.push(voice);
     // console.log('spawn', voice.id, 'voices:', this.voices.length);
     // schedule removal
@@ -1091,29 +1131,40 @@ export class Dough {
       this[this.q[0].type](this.q[0].arg); // type is expected to be a Dough method
       this.q.shift();
     }
-    // add active voices
-    this.out[0] = 0;
-    this.out[1] = 0;
+    // add active voices to their orbits
+    const orbits = this.orbitList;
+    for (let o = 0; o < orbits.length; o++) {
+      orbits[o].out[0] = 0;
+      orbits[o].out[1] = 0;
+    }
     for (let v = 0; v < this.voices.length; v++) {
-      this.voices[v].update(this.t / this.sampleRate);
-      this.out[0] += this.voices[v].out[0];
-      this.out[1] += this.voices[v].out[1];
-      if (this.voices[v].delay) {
-        this.delaysend[0] += this.voices[v].out[0] * this.voices[v].delay;
-        this.delaysend[1] += this.voices[v].out[1] * this.voices[v].delay;
-        this.delaytime = this.voices[v].delaytime; // we trust that these are initialized in the voice
-        this.delayspeed = this.voices[v].delayspeed; // we trust that these are initialized in the voice
-        this.delayfeedback = this.voices[v].delayfeedback;
+      const voice = this.voices[v];
+      const bus = voice.bus;
+      voice.update(this.t / this.sampleRate);
+      bus.out[0] += voice.out[0];
+      bus.out[1] += voice.out[1];
+      if (voice.delay) {
+        bus.send[0] += voice.out[0] * voice.delay;
+        bus.send[1] += voice.out[1] * voice.delay;
+        bus.delaytime = voice.delaytime; // we trust that these are initialized in the voice
+        bus.delayspeed = voice.delayspeed; // we trust that these are initialized in the voice
+        bus.delayfeedback = voice.delayfeedback;
       }
     }
-    // todo: how to change delaytime / delayfeedback from a voice?
-    const delayL = this._delayL.update(this.delaysend[0], this.delaytime);
-    const delayR = this._delayR.update(this.delaysend[1], this.delaytime);
-
-    this.delaysend[0] = delayL * this.delayfeedback;
-    this.delaysend[1] = delayR * this.delayfeedback;
-    this.out[0] += delayL;
-    this.out[1] += delayR;
+    // run each orbit's delay and mix the orbits
+    this.out[0] = 0;
+    this.out[1] = 0;
+    for (let o = 0; o < orbits.length; o++) {
+      const bus = orbits[o];
+      const delayL = bus.delayL.update(bus.send[0], bus.delaytime);
+      const delayR = bus.delayR.update(bus.send[1], bus.delaytime);
+      bus.send[0] = delayL * bus.delayfeedback;
+      bus.send[1] = delayR * bus.delayfeedback;
+      bus.out[0] += delayL;
+      bus.out[1] += delayR;
+      this.out[0] += bus.out[0];
+      this.out[1] += bus.out[1];
+    }
     this.t++;
   }
 }

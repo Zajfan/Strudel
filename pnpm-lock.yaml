@@ -735,6 +735,9 @@ importers:
       '@strudel/draw':
         specifier: workspace:*
         version: link:../draw
+      fflate:
+        specifier: ^0.8.2
+        version: 0.8.2
       superdough:
         specifier: workspace:*
         version: link:../superdough

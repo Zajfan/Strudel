@@ -16,7 +16,10 @@ import {
   setSuperdoughAudioController,
   resetGlobalEffects,
   errorLogger,
+  multiChannelOrbits,
+  setMultiChannelOrbits,
 } from 'superdough';
+import { zipSync } from 'fflate';
 import './supradough.mjs';
 import { workletUrl } from 'supradough';
 import { SuperdoughAudioController } from 'superdough/superdoughoutput.mjs';
@@ -47,41 +50,112 @@ export async function renderPatternAudio(
   multiChannelOrbits,
   downloadName = undefined,
 ) {
+  const renderedBuffer = await renderOffline(pattern, cps, begin, end, sampleRate, maxPolyphony, multiChannelOrbits);
+  downloadBlob(new Blob([audioBufferToWav(renderedBuffer)], { type: 'audio/wav' }), `${downloadName || defaultName()}.wav`);
+}
+
+// Renders [begin, end) cycles of the pattern offline and returns the AudioBuffer. `channels` is the
+// number of output channels; with multiChannelOrbits, orbit n plays on channels 2n-1 and 2n (1-based).
+async function renderOffline(pattern, cps, begin, end, sampleRate, maxPolyphony, multiChannelOrbits, channels = 2) {
   let audioContext = getAudioContext();
   await audioContext.close();
-  audioContext = new OfflineAudioContext(2, ((end - begin) / cps) * sampleRate, sampleRate);
+  audioContext = new OfflineAudioContext(channels, ((end - begin) / cps) * sampleRate, sampleRate);
   setAudioContext(audioContext);
   setSuperdoughAudioController(new SuperdoughAudioController(audioContext));
-  await initAudio({
-    maxPolyphony,
-    multiChannelOrbits,
-  });
-
-  // Firefox currently doesn't support suspending an OfflineAudioContext,
-  // so no chunked rendering. Bad performance, but at least it works.
-  return (
-    audioContext.suspend === undefined
-      ? renderPatternAudioWhole(audioContext, pattern, cps, begin, end)
-      : renderPatternAudioInChunks(audioContext, pattern, cps, begin, end, 1)
-  )
-    .then((renderedBuffer) => {
-      const wavBuffer = audioBufferToWav(renderedBuffer);
-      const blob = new Blob([wavBuffer], { type: 'audio/wav' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      downloadName = downloadName ? `${downloadName}.wav` : `${new Date().toISOString()}.wav`;
-      a.download = `${downloadName}`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    })
-    .finally(async () => {
-      setAudioContext(null);
-      setSuperdoughAudioController(null);
-      resetGlobalEffects();
+  try {
+    await initAudio({
+      maxPolyphony,
+      multiChannelOrbits,
     });
+
+    // Firefox currently doesn't support suspending an OfflineAudioContext,
+    // so no chunked rendering. Bad performance, but at least it works.
+    return await (audioContext.suspend === undefined
+      ? renderPatternAudioWhole(audioContext, pattern, cps, begin, end)
+      : renderPatternAudioInChunks(audioContext, pattern, cps, begin, end, 1));
+  } finally {
+    setAudioContext(null);
+    setSuperdoughAudioController(null);
+    resetGlobalEffects();
+  }
+}
+
+// an OfflineAudioContext has at most 32 channels: 16 stereo orbits
+const MAX_STEM_ORBITS = 16;
+
+/**
+ * Renders [begin, end) cycles of the pattern once, with every orbit on its own pair of channels, and
+ * splits the result into one stereo buffer per orbit (a stem) plus their sum (the mix). Orbit effects
+ * (delay, reverb, ducking) stay in their orbit's stem. Orbits are numbered 1 to 16; orbit 0 shares
+ * orbit 1's channels, and haps with an explicit `channels` control end up in the stem of those channels.
+ * @returns {Promise<{ mix: AudioBuffer, stems: Map<number, AudioBuffer> }>} stems keyed by orbit number
+ */
+export async function renderPatternStems(pattern, cps, begin, end, sampleRate, maxPolyphony) {
+  const orbits = new Set(
+    pattern
+      .queryArc(begin, end, { _cps: cps })
+      .filter((hap) => hap.hasOnset())
+      .map((hap) => Math.max(1, Number(hap2value(hap).orbit ?? 1))),
+  );
+  if (!orbits.size) {
+    orbits.add(1);
+  }
+  const highest = Math.max(...orbits);
+  if (highest > MAX_STEM_ORBITS) {
+    throw new Error(`stems: orbit ${highest} is above ${MAX_STEM_ORBITS}, the most one render can hold`);
+  }
+  const previousMultiChannelOrbits = multiChannelOrbits;
+  let rendered;
+  try {
+    rendered = await renderOffline(pattern, cps, begin, end, sampleRate, maxPolyphony, true, highest * 2);
+  } finally {
+    setMultiChannelOrbits(previousMultiChannelOrbits);
+  }
+  const { length } = rendered;
+  const stereo = () => new AudioBuffer({ numberOfChannels: 2, length, sampleRate: rendered.sampleRate });
+  const mix = stereo();
+  const stems = new Map();
+  for (const orbit of [...orbits].sort((a, b) => a - b)) {
+    const stem = stereo();
+    for (const side of [0, 1]) {
+      const channel = rendered.getChannelData((orbit - 1) * 2 + side);
+      stem.copyToChannel(channel, side);
+      const sum = mix.getChannelData(side);
+      for (let i = 0; i < length; i++) {
+        sum[i] += channel[i];
+      }
+    }
+    stems.set(orbit, stem);
+  }
+  return { mix, stems };
+}
+
+/**
+ * Renders the pattern's stems (see renderPatternStems) and downloads them as one zip:
+ * `<name>-mix.wav` and `<name>-orbit<n>.wav` for every orbit used.
+ */
+export async function exportPatternStems(pattern, cps, begin, end, sampleRate, maxPolyphony, downloadName = undefined) {
+  const { mix, stems } = await renderPatternStems(pattern, cps, begin, end, sampleRate, maxPolyphony);
+  const name = downloadName || defaultName();
+  const files = { [`${name}-mix.wav`]: new Uint8Array(audioBufferToWav(mix)) };
+  for (const [orbit, stem] of stems) {
+    files[`${name}-orbit${orbit}.wav`] = new Uint8Array(audioBufferToWav(stem));
+  }
+  // WAV barely compresses, so the files are stored as they are
+  downloadBlob(new Blob([zipSync(files, { level: 0 })], { type: 'application/zip' }), `${name}-stems.zip`);
+}
+
+const defaultName = () => new Date().toISOString();
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 async function renderPatternAudioWhole(audioContext, pattern, cps, begin, end) {

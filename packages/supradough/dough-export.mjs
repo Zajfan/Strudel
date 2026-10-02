@@ -85,7 +85,8 @@ let cycles = 30;
 let seconds = cycles + 1; // 1s release tail
 const haps = pat.queryArc(0, cycles);
 
-const dough = new Dough(sampleRate);
+// seeded, so the export is the same every time
+const dough = new Dough(sampleRate, 0, 0);
 
 console.log('spawn voices...');
 haps.forEach((hap) => {

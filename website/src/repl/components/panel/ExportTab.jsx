@@ -29,6 +29,7 @@ export default function ExportTab(Props) {
   const [endCycle, setEndCycle] = useState(1);
   const [sampleRate, setSampleRate] = useState(48000);
   const [multiChannelOrbits, setMultiChannelOrbits] = useState(true);
+  const [stems, setStems] = useState(false);
   const [maxPolyphony, setMaxPolyphony] = useState(1024);
   const [exporting, setExporting] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -151,8 +152,16 @@ export default function ExportTab(Props) {
               const val = cbEvent.target.checked;
               setMultiChannelOrbits(val);
             }}
-            disabled={exporting}
+            disabled={exporting || stems}
             value={multiChannelOrbits}
+          />
+        </div>
+        <div>
+          <Checkbox
+            label="Stems (zip with one WAV per orbit, plus the mix)"
+            onChange={(cbEvent) => setStems(cbEvent.target.checked)}
+            disabled={exporting}
+            value={stems}
           />
         </div>
         <button
@@ -163,7 +172,7 @@ export default function ExportTab(Props) {
             setTimeout(refreshProgress, 2000);
             const modal = document.getElementById('exportProgressModal');
             modal.showModal();
-            await handleExport(startCycle, endCycle, sampleRate, maxPolyphony, multiChannelOrbits, downloadName)
+            await handleExport(startCycle, endCycle, sampleRate, maxPolyphony, multiChannelOrbits, downloadName, stems)
               .then(() => {
                 const modal = document.getElementById('exportProgressModal');
                 modal.close();
@@ -181,7 +190,7 @@ export default function ExportTab(Props) {
               width: `${(exporting ? 1 : 0) + (progress / length) * 99}%`,
             }}
           />
-          <span className="text-foreground">{exporting ? 'Exporting...' : 'Export to WAV'}</span>
+          <span className="text-foreground">{exporting ? 'Exporting...' : stems ? 'Export stems' : 'Export to WAV'}</span>
         </button>
       </div>
       <dialog

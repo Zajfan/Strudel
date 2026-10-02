@@ -10,6 +10,7 @@ import { transpiler, evaluate } from '@strudel/transpiler';
 import {
   getAudioContextCurrentTime,
   renderPatternAudio,
+  exportPatternStems,
   webaudioOutput,
   resetGlobalEffects,
   resetLoadedSounds,
@@ -219,18 +220,23 @@ export function useReplContext() {
     editorRef.current.evaluate();
   };
 
-  const handleExport = async (begin, end, sampleRate, maxPolyphony, multiChannelOrbits, downloadName = undefined) => {
+  const handleExport = async (
+    begin,
+    end,
+    sampleRate,
+    maxPolyphony,
+    multiChannelOrbits,
+    downloadName = undefined,
+    stems = false,
+  ) => {
     await editorRef.current.evaluate(false);
     editorRef.current.repl.scheduler.stop();
-    await renderPatternAudio(
-      editorRef.current.repl.state.pattern,
-      editorRef.current.repl.scheduler.cps,
-      begin,
-      end,
-      sampleRate,
-      maxPolyphony,
-      multiChannelOrbits,
-      downloadName,
+    const { pattern } = editorRef.current.repl.state;
+    const { cps } = editorRef.current.repl.scheduler;
+    await (
+      stems
+        ? exportPatternStems(pattern, cps, begin, end, sampleRate, maxPolyphony, downloadName)
+        : renderPatternAudio(pattern, cps, begin, end, sampleRate, maxPolyphony, multiChannelOrbits, downloadName)
     ).finally(async () => {
       const { latestCode, maxPolyphony, audioDeviceName, multiChannelOrbits } = settingsMap.get();
       await initAudio({
