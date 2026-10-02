@@ -5,6 +5,7 @@ This program is free software: you can redistribute it and/or modify it under th
 */
 import { parse } from 'acorn';
 import escodegen from 'escodegen';
+import { SourceMapConsumer } from 'source-map';
 import { walk } from 'estree-walker';
 
 let languages = new Map();
@@ -158,17 +159,45 @@ export function transpiler(input, options = {}) {
     };
   }
   let output = escodegen.generate(ast);
+  const wrapPrefix = '(async ()=>{';
+  const originalPosition = originalPositionLookup(ast, output, wrapAsync ? wrapPrefix.length : 0);
   if (wrapAsync) {
-    output = `(async ()=>{${output}})()`;
+    output = `${wrapPrefix}${output}})()`;
   }
   if (!emitMiniLocations) {
-    return { output };
+    return { output, originalPosition };
   }
 
   let pluginContext;
   ({ options, input, miniDisableRanges, nodeOffset, ...pluginContext } = context);
 
-  return { output, ...pluginContext };
+  return { output, originalPosition, ...pluginContext };
+}
+
+// Returns (line, column) => { line, column } | null, mapping a position in the generated output
+// (1-based line, 0-based column) to the input code. The source map is only built when first needed,
+// since it is only used to locate errors. Nodes added by plugins have no location of their own and map
+// to the nearest located code before them. `firstLineShift` is the length of a prefix added to line 1.
+function originalPositionLookup(ast, output, firstLineShift) {
+  let consumer;
+  return (line, column) => {
+    if (consumer === undefined) {
+      consumer = null;
+      try {
+        const { code, map } = escodegen.generate(ast, { sourceMap: 'input', sourceMapWithCode: true });
+        if (code === output) {
+          consumer = new SourceMapConsumer(map.toString());
+        }
+      } catch (err) {
+        console.warn('[transpiler] could not build source map', err);
+      }
+    }
+    if (!consumer) {
+      return null;
+    }
+    const position = consumer.originalPositionFor({ line, column: line === 1 ? column - firstLineShift : column });
+    return position.line == null ? null : { line: position.line, column: position.column };
+  };
 }
 
 function isAllCall(node) {

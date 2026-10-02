@@ -34,7 +34,8 @@
     "@strudel/mini": "workspace:*",
     "acorn": "^8.14.0",
     "escodegen": "^2.1.0",
-    "estree-walker": "^3.0.3"
+    "estree-walker": "^3.0.3",
+    "source-map": "~0.6.1"
   },
   "devDependencies": {
     "vite": "^6.0.11",

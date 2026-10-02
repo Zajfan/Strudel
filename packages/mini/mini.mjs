@@ -190,13 +190,22 @@ export const getLeafLocation = (code, leaf, globalOffset = 0) => {
 };
 
 // takes quoted mini string, returns ast
-export const mini2ast = (code, start = 0, userCode = code) => {
+// with userCode (the code `code` was taken from, at offset `start`), the error gets a location in it:
+// err.loc = { line (1-based), column (0-based) }, as acorn reports syntax errors
+export const mini2ast = (code, start = 0, userCode) => {
   try {
     return krill.parse(code);
   } catch (error) {
-    const region = [error.location.start.offset + start, error.location.end.offset + start];
-    const line = userCode.slice(0, region[0]).split('\n').length;
-    throw new Error(`[mini] parse error at line ${line}: ${error.message}`);
+    const offset = error.location.start.offset + start;
+    const before = (userCode ?? code).slice(0, offset);
+    const line = before.split('\n').length;
+    if (userCode === undefined) {
+      throw new Error(`[mini] parse error at line ${line}: ${error.message}`);
+    }
+    const column = offset - (before.lastIndexOf('\n') + 1);
+    const err = new Error(`[mini] parse error: ${error.message} (${line}:${column})`);
+    err.loc = { line, column };
+    throw err;
   }
 };
 

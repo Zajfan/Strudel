@@ -54,16 +54,66 @@ export const evalScope = async (...args) => {
   return modules;
 };
 
+// Stack frames of evaluated code carry this name, so runtime errors can be traced back to it.
+const evalSourceURL = 'strudel-eval.js';
+
+// Line of the Function body's first line in its own stack frames: engines put a header
+// (`function anonymous(\n) {`) before the body, of a size that differs between engines.
+const evalBodyLine = (() => {
+  try {
+    Function(`throw new Error()\n//# sourceURL=${evalSourceURL}`)();
+  } catch (err) {
+    return Number(stackPositions(err)[0]?.line ?? NaN);
+  }
+})();
+
+// [{ line, column }] of the evaluated code's frames in err.stack, innermost first (as the engine reports them)
+function stackPositions(err) {
+  const pattern = new RegExp(`${evalSourceURL.replace('.', '\\.')}:(\\d+):(\\d+)`, 'g');
+  return [...String(err?.stack ?? '').matchAll(pattern)].map(([, line, column]) => ({
+    line: Number(line),
+    column: Number(column),
+  }));
+}
+
 function safeEval(str, options = {}) {
   const { wrapExpression = true, wrapAsync = true } = options;
+  let [before, after] = ['', ''];
   if (wrapExpression) {
-    str = `{${str}}`;
+    [before, after] = ['{', '}'];
   }
   if (wrapAsync) {
-    str = `(async ()=>${str})()`;
+    [before, after] = [`(async ()=>${before}`, `${after})()`];
   }
-  const body = `"use strict";return (${str})`;
+  // the code gets lines of its own, so its positions are body positions shifted by one line
+  const body = `"use strict";return (${before}\n${str}\n${after})\n//# sourceURL=${evalSourceURL}`;
   return Function(body)();
+}
+
+// Positions in `code` (1-based line, 1-based column) of the evaluated code's frames in err.stack
+function evalErrorPositions(err) {
+  if (Number.isNaN(evalBodyLine)) {
+    return [];
+  }
+  return stackPositions(err)
+    .map(({ line, column }) => ({ line: line - evalBodyLine, column }))
+    .filter(({ line }) => line >= 1);
+}
+
+// Gives a runtime error the location in the user's code that caused it, like acorn does for syntax errors:
+// err.loc = { line (1-based), column (0-based) }, and ' (line:column)' appended to the message.
+function locateRuntimeError(err, meta) {
+  if (!meta?.originalPosition || !err || typeof err !== 'object' || err.loc) {
+    return;
+  }
+  for (const position of evalErrorPositions(err)) {
+    const loc = meta.originalPosition(position.line, position.column - 1);
+    if (loc) {
+      err.loc = loc;
+      err.message = `${err.message} (${loc.line}:${loc.column})`;
+      return;
+    }
+  }
 }
 
 export const evaluate = async (code, transpiler, transpilerOptions) => {
@@ -77,6 +127,12 @@ export const evaluate = async (code, transpiler, transpilerOptions) => {
   }
   // if no transpiler is given, we expect a single instruction (!wrapExpression)
   const options = { wrapExpression: !!transpiler };
-  let evaluated = await safeEval(code, options);
+  let evaluated;
+  try {
+    evaluated = await safeEval(code, options);
+  } catch (err) {
+    locateRuntimeError(err, meta);
+    throw err;
+  }
   return { mode: 'javascript', pattern: evaluated, meta };
 };

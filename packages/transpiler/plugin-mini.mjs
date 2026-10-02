@@ -51,7 +51,7 @@ const backtick = {
     enter: function (node, parent, prop, index) {
       if (!isBackTickString(node, parent)) return;
       context.miniLocations ??= [];
-      const { options, input, miniDisableRanges, miniLocations } = context;
+      const { options, input, miniDisableRanges, miniLocations, nodeOffset } = context;
       const { emitMiniLocations } = options;
       if (isMiniDisabled(node.start, miniDisableRanges)) {
         return;
@@ -59,7 +59,7 @@ const backtick = {
       const { quasis } = node;
       const { raw } = quasis[0].value;
       this.skip();
-      emitMiniLocations && collectMiniLocations(raw, node, miniLocations, input);
+      emitMiniLocations && collectMiniLocations(raw, node, miniLocations, nodeOffset ? undefined : input);
       return this.replace(miniWithLocation(raw, node));
     },
   }),
@@ -70,14 +70,16 @@ const doublequotes = {
     enter: function (node, parent, prop, index) {
       if (!isStringWithDoubleQuotes(node)) return;
       context.miniLocations ??= [];
-      const { options, input, miniDisableRanges, miniLocations } = context;
+      const { options, input, miniDisableRanges, miniLocations, nodeOffset } = context;
       const { emitMiniLocations } = options;
       if (isMiniDisabled(node.start, miniDisableRanges)) {
         return;
       }
       const { value } = node;
       this.skip();
-      emitMiniLocations && collectMiniLocations(value, node, miniLocations, input);
+      // in block-based evaluation node.start is shifted to the whole document, which input doesn't cover,
+      // so parse errors can't be located in input
+      emitMiniLocations && collectMiniLocations(value, node, miniLocations, nodeOffset ? undefined : input);
       return this.replace(miniWithLocation(value, node));
     },
   }),
@@ -175,6 +177,8 @@ function miniWithLocation(value, node) {
       { type: 'Literal', value: fromOffset },
     ],
     optional: false,
+    // so errors raised in the call map back to the string (see originalPositionLookup)
+    loc: node.loc,
   };
 }
 
