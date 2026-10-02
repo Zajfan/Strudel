@@ -160,6 +160,9 @@ evalScope(
     midin,
     midikeys,
     sysex,
+    // These tests inspect event structure, not sample loading or audio playback.
+    // Keep this after webaudio so its real loader cannot replace the mock.
+    samples: id,
     // gist,
     // euclid,
     csound: id,
