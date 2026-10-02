@@ -12,6 +12,7 @@ import {
   judgeMix,
   calibrateGain,
   rampTiming,
+  clockJitter,
   judgeStems,
   liveGap,
   locateError,
@@ -306,5 +307,23 @@ describe('rampTiming', () => {
     const r = rampTiming(tone((t) => 0.1 + 0.9 * Math.max(0, t - 0.005), 1), sr, shape, calibration);
     expect(r.maxErrorMs).toBeGreaterThan(4.5);
     expect(r.maxErrorMs).toBeLessThan(5.5);
+  });
+});
+
+describe('clockJitter', () => {
+  it('reports the interval of a steady clock, and no jitter, even when it runs slightly fast', () => {
+    const r = clockJitter(Array.from({ length: 100 }, (_, i) => 1000 + i * 41.5));
+    expect(r.intervalMs).toBeCloseTo(41.5, 9);
+    expect(r.maxJitterMs).toBeLessThan(1e-9);
+  });
+  it('reports the largest deviation of a tick as jitter', () => {
+    const times = Array.from({ length: 101 }, (_, i) => i * 40);
+    times[50] += 3;
+    const r = clockJitter(times);
+    expect(r.maxJitterMs).toBeGreaterThan(2.9);
+    expect(r.maxJitterMs).toBeLessThan(3.01);
+  });
+  it('fails closed with too few ticks', () => {
+    expect(clockJitter([0, 1]).maxJitterMs).toBe(Infinity);
   });
 });

@@ -446,21 +446,28 @@
       }
     },
     "SYNC-1": {
-      "status": "not-run",
+      "status": "pass",
       "metrics": {
-        "requestMIDIAccess": "function"
+        "ticks": 1432,
+        "measuredTicks": 1407,
+        "expectedIntervalMs": 41.666666666666664,
+        "intervalMs": 41.666055419931425,
+        "maxJitterMs": 1.2007012750073045,
+        "rmsJitterMs": 0.5719728659697216,
+        "headline": "1.201 ms max jitter over 1407 ticks"
       },
       "notes": {
-        "reason": "headless Chromium has no MIDI output devices"
+        "route": "midicmd(\"clock*48\").midi('Midi Through Port-0') at 0.5 cps; read back on the loopback input",
+        "scope": "headless Chromium, ALSA Midi Through loopback; receive timestamps (event.timeStamp) include the loopback"
       },
       "run": {
-        "ranAt": "2026-10-02T04:42:05.112Z",
-        "commit": "3dc3478e",
+        "ranAt": "2026-10-02T10:50:37.873Z",
+        "commit": "12b09353",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
         "platform": "linux-x64",
-        "distBuiltAt": "2026-10-02T04:40:23.319Z",
+        "distBuiltAt": "2026-10-02T10:48:35.565Z",
         "thresholds": {
           "maxJitterMs": 2
         }

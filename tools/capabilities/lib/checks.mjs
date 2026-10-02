@@ -157,6 +157,32 @@ export function rampTiming(samples, sampleRate, { begin, duration, from, to, per
   return { maxErrorMs, windows };
 }
 
+// SYNC-1: jitter of clock ticks received at `times` (ms). A least-squares line through the times
+// gives the clock's actual interval; jitter is the largest deviation of a tick from that line, so
+// a steady tempo offset (a slightly fast or slow clock) is reported as the interval, not as jitter.
+export function clockJitter(times) {
+  const n = times.length;
+  if (n < 3) return { count: n, intervalMs: NaN, maxJitterMs: Infinity, rmsJitterMs: Infinity };
+  const meanI = (n - 1) / 2;
+  const meanT = times.reduce((a, b) => a + b, 0) / n;
+  let num = 0;
+  let den = 0;
+  times.forEach((t, i) => {
+    num += (i - meanI) * (t - meanT);
+    den += (i - meanI) ** 2;
+  });
+  const intervalMs = num / den;
+  const offset = meanT - intervalMs * meanI;
+  let max = 0;
+  let sumSq = 0;
+  times.forEach((t, i) => {
+    const r = t - (offset + intervalMs * i);
+    max = Math.max(max, Math.abs(r));
+    sumSq += r * r;
+  });
+  return { count: n, intervalMs, maxJitterMs: max, rmsJitterMs: Math.sqrt(sumSq / n) };
+}
+
 export function stemResidual(mix, stems) {
   let worst = 0;
   for (let i = 0; i < mix.length; i++) {

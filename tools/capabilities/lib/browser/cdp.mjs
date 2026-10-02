@@ -122,7 +122,7 @@ export async function openPage(port, url) {
     }
   }
 
-  return { evaluate, click, errors, warnings, consoleErrors, close, targetId };
+  return { evaluate, click, send, errors, warnings, consoleErrors, close, targetId };
 }
 
 export async function waitForRepl(page, timeoutMs = 60000) {
