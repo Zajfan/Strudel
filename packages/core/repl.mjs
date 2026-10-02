@@ -65,6 +65,12 @@ export function repl({
         reset_state();
       }
     },
+    onError: (err) => {
+      // a pattern with nothing to fall back to fails on every tick; only update state when the error changes
+      if (state.schedulerError?.message !== err.message) {
+        updateState({ schedulerError: err });
+      }
+    },
     setInterval,
     clearInterval,
     beforeStart,
@@ -422,6 +428,8 @@ export function repl({
       pattern = applyPatternTransforms(pattern);
 
       logger(`[eval] code updated`);
+      // cleared before scheduling, so a query error from the first tick is not overwritten
+      updateState({ schedulerError: undefined });
       pattern = await setPattern(pattern, autostart);
       updateState({
         miniLocations: meta?.miniLocations || [],
@@ -430,7 +438,6 @@ export function repl({
         activeCode: code,
         pattern,
         evalError: undefined,
-        schedulerError: undefined,
         pending: false,
       });
 
@@ -534,6 +541,8 @@ export function repl({
       pattern = applyPatternTransforms(pattern);
 
       logger(`[eval] code updated`);
+      // cleared before scheduling, so a query error from the first tick is not overwritten
+      updateState({ schedulerError: undefined });
       pattern = await setPattern(pattern, autostart);
       updateState({
         miniLocations: meta?.miniLocations || [],
@@ -542,7 +551,6 @@ export function repl({
         activeCode: code,
         pattern,
         evalError: undefined,
-        schedulerError: undefined,
         pending: false,
       });
 

@@ -4,11 +4,12 @@ Copyright (C) 2022 Strudel contributors - see <https://codeberg.org/uzu/strudel/
 This program is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version. This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Affero General Public License for more details. You should have received a copy of the GNU Affero General Public License along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-import { logger } from './logger.mjs';
+import { errorLogger, logger } from './logger.mjs';
+import { queryScheduledPattern, setScheduledPattern } from './fallbackquery.mjs';
 import { ClockCollator, cycleToSeconds } from './util.mjs';
 
 export class NeoCyclist {
-  constructor({ onTrigger, onToggle, getTime }) {
+  constructor({ onTrigger, onToggle, onError, getTime }) {
     this.started = false;
     this.cps = 0.5;
     this.getTime = getTime; // get absolute time
@@ -38,15 +39,20 @@ export class NeoCyclist {
       if (this.started === false) {
         return;
       }
-      const haps = this.pattern.queryArc(begin, end, { _cps: this.cps, cyclist: 'neocyclist' });
-      haps.forEach((hap) => {
-        if (hap.hasOnset()) {
-          const timeUntilTrigger = cycleToSeconds(hap.whole.begin - this.cycle, this.cps);
-          const targetTime = timeUntilTrigger + currentTime + this.latency;
-          const duration = cycleToSeconds(hap.duration, this.cps);
-          onTrigger?.(hap, 0, duration, this.cps, targetTime);
-        }
-      });
+      try {
+        const haps = queryScheduledPattern(this, begin, end, { _cps: this.cps, cyclist: 'neocyclist' }, onError);
+        haps.forEach((hap) => {
+          if (hap.hasOnset()) {
+            const timeUntilTrigger = cycleToSeconds(hap.whole.begin - this.cycle, this.cps);
+            const targetTime = timeUntilTrigger + currentTime + this.latency;
+            const duration = cycleToSeconds(hap.duration, this.cps);
+            onTrigger?.(hap, 0, duration, this.cps, targetTime);
+          }
+        });
+      } catch (e) {
+        errorLogger(e, 'neocyclist');
+        onError?.(e);
+      }
     };
 
     // receive messages from worker clock and process them
@@ -92,7 +98,7 @@ export class NeoCyclist {
     this.setStarted(false);
   }
   setPattern(pat, autostart = false) {
-    this.pattern = pat;
+    setScheduledPattern(this, pat);
     if (autostart && !this.started) {
       this.start();
     }

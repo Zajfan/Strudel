@@ -6,6 +6,7 @@ This program is free software: you can redistribute it and/or modify it under th
 
 import createClock from './zyklus.mjs';
 import { errorLogger, logger } from './logger.mjs';
+import { queryScheduledPattern, setScheduledPattern } from './fallbackquery.mjs';
 
 export class Cyclist {
   constructor({
@@ -57,7 +58,7 @@ export class Cyclist {
           }
 
           // query the pattern for events
-          const haps = this.pattern.queryArc(begin, end, { _cps: this.cps, cyclist: 'cyclist' });
+          const haps = queryScheduledPattern(this, begin, end, { _cps: this.cps, cyclist: 'cyclist' }, onError);
 
           haps.forEach((hap) => {
             if (hap.hasOnset()) {
@@ -121,7 +122,7 @@ export class Cyclist {
     this.setStarted(false);
   }
   async setPattern(pat, autostart = false) {
-    this.pattern = pat;
+    setScheduledPattern(this, pat);
     if (autostart && !this.started) {
       await this.start();
     }
