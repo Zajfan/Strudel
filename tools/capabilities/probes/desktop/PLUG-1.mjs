@@ -25,6 +25,8 @@ const mixerCode = (room) =>
   `$: note("c6 ~ ~ ~").s("sine").gain(0.3).release(0.05).orbit(${REFERENCE_ORBIT})`;
 const AUTO_CODE = `setcps(0.5)\nnote("c4").clap('${PLUGIN}').auto(saw.range(1, 0), { c: 'Global Volume' })`;
 const NATIVE_CODE = `setcps(1)\nnote("c4 e4 g4 c5").clap('${PLUGIN}', { output: 'native' })`;
+// the same, with the plugin's volume automated (to 0)
+const NATIVE_MUTED_CODE = `setcps(1)\nnote("c4 e4 g4 c5").clap('${PLUGIN}', { output: 'native' }).auto(0, { c: 'Global Volume' })`;
 
 // Runs in the page; serialized with toString(), so no closures over Node scope.
 async function recordMixer({ code, seconds, plugin, orbit }) {
@@ -82,7 +84,7 @@ async function recordMixer({ code, seconds, plugin, orbit }) {
   return { sampleRate: ctx.sampleRate, plugin: b64(recorded[0]), reference: b64(recorded[1]), master: b64(recorded[2]) };
 }
 
-async function playNative({ code, seconds, plugin }) {
+async function playNative({ code, seconds, plugin, unload = true }) {
   const native = window.__TAURI_INTERNALS__;
   await setPluginDevice('strudel_null');
   await native.invoke('engine_capture', { start: true });
@@ -102,8 +104,8 @@ async function playNative({ code, seconds, plugin }) {
   let sumSq = 0;
   for (const s of samples) sumSq += s * s;
   const stats = await native.invoke('engine_stats');
-  await unloadClap(plugin);
-  return { stats, rms: samples.length ? Math.sqrt(sumSq / samples.length) : 0, loadedAfterUnload: await loadedClaps() };
+  if (unload) await unloadClap(plugin);
+  return { stats, samples: samples.length, rms: samples.length ? Math.sqrt(sumSq / samples.length) : 0, loadedAfterUnload: await loadedClaps() };
 }
 
 const decode = (b64) => {
@@ -212,7 +214,11 @@ export async function probe({ page, thresholds }) {
   const guiClosed = !windows().includes(`"${guiTitle}"`);
 
   // 3. on a native output
-  const native = await page.evaluate(playNative, { code: NATIVE_CODE, seconds: 3, plugin: PLUGIN }, { timeoutMs: 120000 });
+  const native = await page.evaluate(playNative, { code: NATIVE_CODE, seconds: 3, plugin: PLUGIN, unload: false }, { timeoutMs: 120000 });
+  // automation on the native output: the engine applies the parameter changes (counted). (Their
+  // effect on the sound is checked in the mixer above and in the Rust tests; the silent test device
+  // has no clock, so its capture can't show it.)
+  const muted = await page.evaluate(playNative, { code: NATIVE_MUTED_CODE, seconds: 3, plugin: PLUGIN }, { timeoutMs: 120000 });
   const metrics = {
     pluginNotes: pluginOnsets.length,
     referenceNotes: referenceOnsets.length,
@@ -226,7 +232,14 @@ export async function probe({ page, thresholds }) {
     automationDropDb,
     native: native.error
       ? { error: native.error }
-      : { notes: native.stats.notes, lateNotes: native.stats.lateNotes, device: native.stats.device, rms: native.rms, loadedAfterUnload: native.loadedAfterUnload },
+      : {
+          notes: native.stats.notes,
+          lateNotes: native.stats.lateNotes,
+          device: native.stats.device,
+          rms: native.rms,
+          paramChanges: muted.stats?.paramChanges,
+          loadedAfterUnload: muted.loadedAfterUnload,
+        },
     headline: `${PLUGIN} in the mixer: within ${maxOffsetMs.toFixed(1)} ms of the beat, room +${tailGainDb.toFixed(1)} dB, automation -${automationDropDb.toFixed(0)} dB, GUI ${guiWidth}x${guiHeight}; native: ${native.stats?.notes ?? 0} notes`,
   };
   const fail = (error) => ({ status: 'fail', metrics, notes: { ...notes, error } });
@@ -247,6 +260,8 @@ export async function probe({ page, thresholds }) {
   if (!(native.stats.notes >= 11) || native.stats.lateNotes > 0) return fail(`native output: ${native.stats.notes} notes, ${native.stats.lateNotes} late`);
   if (!(native.rms >= thresholds.minRms)) return fail(`native output rms ${native.rms}`);
   if (native.stats.device !== 'strudel_null') return fail(`native output played on ${native.stats.device}`);
-  if (native.loadedAfterUnload.length) return fail(`still loaded after unloadClap: ${native.loadedAfterUnload}`);
+  if (muted.error) return fail(`native output, automated: ${muted.error}`);
+  if (!(muted.stats.paramChanges > 0)) return fail('the native output applied no parameter changes for .auto()');
+  if (muted.loadedAfterUnload.length) return fail(`still loaded after unloadClap: ${muted.loadedAfterUnload}`);
   return { status: 'pass', metrics, notes };
 }

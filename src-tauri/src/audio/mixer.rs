@@ -210,6 +210,11 @@ impl MixerEngine {
     Ok(true)
   }
 
+  // a loaded plugin's index here, by name
+  pub fn index_of(&self, plugin: &str) -> Option<usize> {
+    self.inner.lock().unwrap().as_ref().and_then(|inner| inner.plugins.get(plugin).copied())
+  }
+
   // the parameters a pattern can automate on a loaded plugin
   pub fn param_list(&self, plugin: usize) -> Result<Vec<ParamDesc>, String> {
     let guard = self.inner.lock().unwrap();

@@ -58,7 +58,9 @@ fn main() {
         audio::mix_render,
         audio::mix_param_list,
         audio::mix_params,
-        audio::clap_gui
+        audio::clap_gui,
+        audio::clap_param_list,
+        audio::clap_params
       ]
     )
     .setup(|app| {

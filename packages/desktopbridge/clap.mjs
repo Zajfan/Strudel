@@ -104,7 +104,8 @@ function getStream(plugin) {
 const toKey = (note) => (typeof note === 'number' ? Math.round(note) : noteToMidi(note));
 
 // The hap's automation curves (see `auto`) that name one of the plugin's parameters, as timed plain
-// values: each curve spans the note, and the parameter keeps its last value afterwards.
+// values: each curve spans the note, and the parameter keeps its last value afterwards. `time` and
+// `duration` in any unit (seconds for the mixer, epoch ms for the native output).
 function paramChanges(value, params, time, duration) {
   const changes = [];
   for (const id of value.auto?.__ids ?? []) {
@@ -138,18 +139,30 @@ function playInMixer(plugin, hap, cps, targetTime) {
 // ------------------------------------------------------------------ on a native output
 // Lower latency, but outside the page's mixer: no Strudel effects, and only approximately in time
 // with the page's audio (both reach the OS mixer on their own).
+// the native output's parameter lists, by plugin (fetched once it has loaded the plugin)
+const nativeParams = new Map();
+const getNativeParams = (plugin) => {
+  if (!nativeParams.has(plugin)) {
+    const list = Invoke('clap_param_list', { plugin }).then((params) => new Map(params.map((p) => [p.name.toLowerCase(), p])));
+    list.catch(() => nativeParams.delete(plugin));
+    nativeParams.set(plugin, list);
+  }
+  return nativeParams.get(plugin);
+};
+
 function playNative(plugin, hap, currentTime, cps, targetTime) {
   const { note, velocity = 0.9, gain = 1 } = hap.value;
-  if (note == null) return;
-  const notes = [
-    {
-      time: toEpochMs(targetTime, currentTime),
-      duration: (hap.duration.valueOf() / cps) * 1000,
-      key: toKey(note),
-      velocity: Math.min(1, gain * velocity),
-    },
-  ];
-  Invoke('clap_play', { plugin, notes }).catch((err) => logger(`[clap] ${err}`, 'error'));
+  const time = toEpochMs(targetTime, currentTime);
+  const duration = (hap.duration.valueOf() / cps) * 1000;
+  const notes = note == null ? [] : [{ time, duration, key: toKey(note), velocity: Math.min(1, gain * velocity) }];
+  // clap_play loads the plugin (and starts the engine) if needed; parameters go after it
+  Invoke('clap_play', { plugin, notes })
+    .then(async () => {
+      if (!hap.value.auto) return;
+      const changes = paramChanges(hap.value, await getNativeParams(plugin), time, duration);
+      if (changes.length) await Invoke('clap_params', { plugin, params: changes });
+    })
+    .catch((err) => logger(`[clap] ${err}`, 'error'));
 }
 
 /**
@@ -159,7 +172,7 @@ function playNative(plugin, hap, currentTime, cps, targetTime) {
  * pan, stems and cue apply to it, and it is in time with everything else. Its parameters can be
  * automated with `auto`, by name (clapParams lists them), in their own value range:
  *   note("c2").clap('Surge XT').auto(sine.range(0, 1).slow(4), { c: 'Global Volume' }) `{ output: 'native' }`
- * plays it on the plugin output device instead (lower latency, no Strudel effects).
+ * plays it on the plugin output device instead (lower latency, no Strudel effects; `auto` works too).
  * Uses note and velocity (0-1, default 0.9) per note, and each note's duration.
  * @name clap
  * @param {string} plugin the plugin's file name without .clap, e.g. 'Surge XT'

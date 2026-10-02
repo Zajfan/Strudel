@@ -650,12 +650,8 @@ impl Slot {
     let _ = self.retire.send(self.processor.stop_processing());
   }
 
-  // Renders n frames with the given (offset, event) notes and adds them into out (interleaved).
-  pub(crate) fn render_into(&mut self, out: &mut [f32], n: usize, notes: &[(u32, NoteEvent)]) {
-    self.render_with_params(out, n, notes, &[]);
-  }
-
-  // As render_into, with (offset, param id, plain value) parameter changes; both in time order.
+  // Renders n frames with the given (offset, event) notes and (offset, param id, plain value)
+  // parameter changes, both in time order, and adds them into out (interleaved).
   pub(crate) fn render_with_params(&mut self, out: &mut [f32], n: usize, notes: &[(u32, NoteEvent)], params: &[(u32, u32, f64)]) {
     self.events_in.clear();
     self.events_out.clear();
@@ -735,6 +731,7 @@ struct Stats {
   frames: AtomicU64,
   notes: AtomicU64,
   late_notes: AtomicU64,
+  param_changes: AtomicU64,
   plugins: AtomicU64,
 }
 
@@ -748,6 +745,7 @@ pub struct EngineStats {
   frames: u64,
   notes: u64,
   late_notes: u64,
+  param_changes: u64,
 }
 
 struct Running {
@@ -758,6 +756,9 @@ struct Running {
   unloaded: HashMap<usize, Receiver<()>>,
   host_ids: HashMap<usize, u64>,
   events: Producer<NoteEvent>,
+  param_events: Producer<ParamEvent>,
+  // each plugin's automatable parameters, by index
+  params: HashMap<usize, Vec<ParamDesc>>,
   stop: Sender<()>,
   stats: Arc<Stats>,
   capture: Arc<Mutex<Vec<f32>>>,
@@ -769,6 +770,22 @@ struct Running {
 #[derive(Default)]
 pub struct PluginEngine {
   running: Mutex<Option<Running>>,
+}
+
+// a parameter change for the native output: at a Unix-epoch time (ms), like its notes
+#[derive(Deserialize)]
+pub struct ParamFromJs {
+  time: f64,
+  id: u32,
+  value: f64,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct ParamEvent {
+  plugin: usize,
+  due: Instant,
+  id: u32,
+  value: f64,
 }
 
 #[derive(Deserialize)]
@@ -795,6 +812,7 @@ impl PluginEngine {
     self.stop();
     let (commands_tx, mut commands_rx) = RingBuffer::<AudioCommand>::new(64);
     let (events_tx, mut events_rx) = RingBuffer::<NoteEvent>::new(8192);
+    let (param_tx, mut param_rx) = RingBuffer::<ParamEvent>::new(16384);
     let stats = Arc::new(Stats::default());
     let capture = Arc::new(Mutex::new(Vec::new()));
     let capturing = Arc::new(AtomicBool::new(false));
@@ -823,6 +841,8 @@ impl PluginEngine {
         let sr = sample_rate as f64;
         let mut slots: Vec<Slot> = Vec::new();
         let mut pending: Vec<NoteEvent> = Vec::new();
+        let mut pending_params: Vec<ParamEvent> = Vec::new();
+        let mut block_params: Vec<(u32, u32, f64)> = Vec::with_capacity(256);
         let mut block_notes: Vec<(u32, NoteEvent)> = Vec::with_capacity(256);
         let stream = device
           .build_output_stream(
@@ -843,6 +863,9 @@ impl PluginEngine {
                     pending.retain(|ev| ev.plugin != index);
                   }
                 }
+              }
+              while let Ok(ev) = param_rx.pop() {
+                pending_params.push(ev);
               }
               while let Ok(ev) = events_rx.pop() {
                 pending.push(ev);
@@ -876,7 +899,18 @@ impl PluginEngine {
                   // CLAP wants events in time order, note-offs first at equal times
                   block_notes.sort_by_key(|(o, ev)| (*o, ev.on));
                   t_stats.notes.fetch_add(block_notes.iter().filter(|(_, e)| e.on).count() as u64, Ordering::Relaxed);
-                  slot.render_into(&mut out[done * CHANNELS..(done + n) * CHANNELS], n, &block_notes);
+                  block_params.clear();
+                  pending_params.retain(|ev| {
+                    if ev.plugin != slot.index || ev.due >= end {
+                      return true;
+                    }
+                    let offset = if ev.due <= start { 0 } else { ((ev.due - start).as_secs_f64() * sr) as u32 };
+                    block_params.push((offset.min(n as u32 - 1), ev.id, ev.value));
+                    false
+                  });
+                  block_params.sort_by_key(|(o, _, _)| *o);
+                  t_stats.param_changes.fetch_add(block_params.len() as u64, Ordering::Relaxed);
+                  slot.render_with_params(&mut out[done * CHANNELS..(done + n) * CHANNELS], n, &block_notes, &block_params);
                 }
                 done += n;
               }
@@ -918,6 +952,8 @@ impl PluginEngine {
       unloaded: HashMap::new(),
       host_ids: HashMap::new(),
       events: events_tx,
+      param_events: param_tx,
+      params: HashMap::new(),
       stop,
       stats,
       capture,
@@ -1006,6 +1042,7 @@ impl PluginEngine {
     let index = running.next_index;
     running.next_index += 1;
     let Loaded { slot, unloaded, id } = load_plugin(plugin, index, running.sample_rate as f64)?;
+    running.params.insert(index, slot.layout.params.clone());
     running.host_ids.insert(index, id);
     running.unloaded.insert(index, unloaded);
     running.commands.push(AudioCommand::Add(slot)).map_err(|_| "the audio thread is busy".to_string())?;
@@ -1015,6 +1052,25 @@ impl PluginEngine {
 
   // Plays notes on the named plugin, loading it (and starting the engine on the default device)
   // first if needed.
+  // the parameters a pattern can automate on a loaded plugin; None if it isn't loaded here
+  pub fn param_list(&self, plugin: &str) -> Option<Vec<ParamDesc>> {
+    let guard = self.running.lock().unwrap();
+    let running = guard.as_ref()?;
+    running.plugins.get(plugin).and_then(|index| running.params.get(index)).cloned()
+  }
+
+  // Parameter changes at absolute times, on a loaded plugin.
+  pub fn params(&self, plugin: &str, params: Vec<ParamFromJs>) -> Result<(), String> {
+    let mut guard = self.running.lock().unwrap();
+    let running = guard.as_mut().ok_or("the plugin engine is not running")?;
+    let index = *running.plugins.get(plugin).ok_or_else(|| format!("\"{}\" is not loaded", plugin))?;
+    for p in params {
+      let ev = ParamEvent { plugin: index, due: epoch_to_instant(p.time), id: p.id, value: p.value };
+      running.param_events.push(ev).map_err(|_| "too many queued parameter changes".to_string())?;
+    }
+    Ok(())
+  }
+
   pub fn play(&self, plugin: &str, notes: Vec<NoteFromJs>) -> Result<(), String> {
     let index = self.load(plugin)?;
     let mut guard = self.running.lock().unwrap();
@@ -1035,7 +1091,7 @@ impl PluginEngine {
   pub fn stats(&self) -> EngineStats {
     let guard = self.running.lock().unwrap();
     match guard.as_ref() {
-      None => EngineStats { running: false, device: None, sample_rate: 0, plugins: vec![], frames: 0, notes: 0, late_notes: 0 },
+      None => EngineStats { running: false, device: None, sample_rate: 0, plugins: vec![], frames: 0, notes: 0, late_notes: 0, param_changes: 0 },
       Some(r) => {
         let mut plugins: Vec<(&String, &usize)> = r.plugins.iter().collect();
         plugins.sort_by_key(|(_, i)| **i);
@@ -1047,6 +1103,7 @@ impl PluginEngine {
           frames: r.stats.frames.load(Ordering::Relaxed),
           notes: r.stats.notes.load(Ordering::Relaxed),
           late_notes: r.stats.late_notes.load(Ordering::Relaxed),
+          param_changes: r.stats.param_changes.load(Ordering::Relaxed),
         }
       }
     }

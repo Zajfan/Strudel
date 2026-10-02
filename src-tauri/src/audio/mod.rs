@@ -11,7 +11,7 @@ use tauri::State;
 use cue::{ CueState, CueStats };
 use mixer::{ MixNote, MixParam, MixerEngine };
 use plugins::ParamDesc;
-use plugins::{ EngineStats, NoteFromJs, PluginEngine };
+use plugins::{ EngineStats, NoteFromJs, ParamFromJs, PluginEngine };
 
 #[tauri::command]
 pub fn cue_devices() -> Result<Vec<String>, String> {
@@ -140,4 +140,19 @@ pub fn clap_gui(plugin: String, show: bool, engine: State<'_, PluginEngine>, mix
   } else {
     Err(format!("\"{}\" is not loaded: play a note on it first", plugin))
   }
+}
+
+// A loaded plugin's automatable parameters, by name, from whichever engine has it.
+#[tauri::command]
+pub fn clap_param_list(plugin: String, engine: State<'_, PluginEngine>, mixer: State<'_, MixerEngine>) -> Result<Vec<ParamDesc>, String> {
+  if let Some(index) = mixer.index_of(&plugin) {
+    return mixer.param_list(index);
+  }
+  engine.param_list(&plugin).ok_or_else(|| format!("\"{}\" is not loaded: play a note on it first", plugin))
+}
+
+// parameter changes for a plugin on the native output, at Unix-epoch times (ms)
+#[tauri::command]
+pub fn clap_params(plugin: String, params: Vec<ParamFromJs>, engine: State<'_, PluginEngine>) -> Result<(), String> {
+  engine.params(&plugin, params)
 }
