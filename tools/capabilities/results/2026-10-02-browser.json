@@ -36,13 +36,13 @@
         "construct": "arrange() + filterWhen(t < 64)"
       },
       "run": {
-        "ranAt": "2026-09-29T12:19:01.426Z",
-        "commit": "96df6ef6",
+        "ranAt": "2026-10-02T04:02:46.244Z",
+        "commit": "845fe328",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
         "platform": "linux-x64",
-        "distBuiltAt": "2026-09-28T12:20:01.666Z",
+        "distBuiltAt": "2026-10-02T04:01:06.713Z",
         "thresholds": {}
       }
     },
@@ -52,19 +52,19 @@
         "triggers": 3,
         "drops": [
           {
-            "atSample": 18302,
+            "atSample": 18814,
             "beforeRms": 0.10757157744985496,
             "afterRms": 0.002276125185450208,
             "dropDb": 33.49002785890473
           },
           {
-            "atSample": 66302,
+            "atSample": 66814,
             "beforeRms": 0.10757157744985496,
             "afterRms": 0.002276125185450208,
             "dropDb": 33.49002785890473
           },
           {
-            "atSample": 114302,
+            "atSample": 114814,
             "beforeRms": 0.10757157744985496,
             "afterRms": 0.002276125185450208,
             "dropDb": 33.49002785890473
@@ -72,9 +72,9 @@
         ],
         "dropDb": 33.49002785890473,
         "beforeRms": 0.10757157744985496,
-        "recordedSamples": 145408,
+        "recordedSamples": 145920,
         "sampleRate": 48000,
-        "offlineDropDb": 16.008822261369737,
+        "offlineDropDb": 7.5513275074018935,
         "headline": "33.5 dB duck (live)"
       },
       "notes": {
@@ -85,13 +85,13 @@
         "reason": "partial: ducking verified; 4 buses + send not verified by this probe"
       },
       "run": {
-        "ranAt": "2026-09-29T12:19:01.426Z",
-        "commit": "96df6ef6",
+        "ranAt": "2026-10-02T04:02:46.244Z",
+        "commit": "845fe328",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
         "platform": "linux-x64",
-        "distBuiltAt": "2026-09-28T12:20:01.666Z",
+        "distBuiltAt": "2026-10-02T04:01:06.713Z",
         "thresholds": {
           "minDuckDb": 6
         }
@@ -198,13 +198,13 @@
         "error": "automation is sampled once per event; no continuous ramp within a held note"
       },
       "run": {
-        "ranAt": "2026-09-29T12:19:01.426Z",
-        "commit": "96df6ef6",
+        "ranAt": "2026-10-02T04:02:46.244Z",
+        "commit": "845fe328",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
         "platform": "linux-x64",
-        "distBuiltAt": "2026-09-28T12:20:01.666Z",
+        "distBuiltAt": "2026-10-02T04:01:06.713Z",
         "thresholds": {
           "maxErrorMs": 1
         }
@@ -214,31 +214,31 @@
       "status": "fail",
       "metrics": {
         "events": 1115,
-        "rms": 0.10703429219853593,
+        "rms": 0.1069259699980428,
         "lengthSamples": 3072000,
         "expectedLength": 3072000,
         "secondLength": 3072000,
         "hashes": [
-          "44ca9ba2",
-          "32b89ea7"
+          "e61d008d",
+          "112d9533"
         ],
-        "firstDifferenceLeft": 1,
+        "firstDifferenceLeft": 4,
         "channels": 2,
         "headline": "non-deterministic"
       },
       "notes": {
         "renderer": "renderPatternAudio (superdough, OfflineAudioContext)",
         "scope": "left channel hashed; render has no tail",
-        "error": "renders differ from sample 1 (0.000 s): length 3072000 vs 3072000, FNV-1a 44ca9ba2 vs 32b89ea7"
+        "error": "renders differ from sample 4 (0.000 s): length 3072000 vs 3072000, FNV-1a e61d008d vs 112d9533"
       },
       "run": {
-        "ranAt": "2026-09-29T12:19:01.426Z",
-        "commit": "96df6ef6",
+        "ranAt": "2026-10-02T04:02:46.244Z",
+        "commit": "845fe328",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
         "platform": "linux-x64",
-        "distBuiltAt": "2026-09-28T12:20:01.666Z",
+        "distBuiltAt": "2026-10-02T04:01:06.713Z",
         "thresholds": {
           "minRms": 0.001
         }
@@ -257,13 +257,13 @@
         "error": "no stem export API"
       },
       "run": {
-        "ranAt": "2026-09-29T12:19:01.426Z",
-        "commit": "96df6ef6",
+        "ranAt": "2026-10-02T04:02:46.244Z",
+        "commit": "845fe328",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
         "platform": "linux-x64",
-        "distBuiltAt": "2026-09-28T12:20:01.666Z",
+        "distBuiltAt": "2026-10-02T04:01:06.713Z",
         "thresholds": {
           "maxResidualDbfs": -60
         }
@@ -278,9 +278,9 @@
         "late": 0,
         "lateStarts": 0,
         "droppedPastHaps": 0,
-        "minLeadMs": 99.33333333333336,
+        "minLeadMs": 99.3,
         "silentWindows": 0,
-        "durationS": 60.00016999983787,
+        "durationS": 60.00009499999881,
         "cps": 0.5,
         "analyserCount": 1,
         "headline": "64 voices, 0 late, 0 silent windows"
@@ -289,13 +289,13 @@
         "scope": "headless Chromium, fake audio device: measures scheduling lateness and rendered signal, not DAC underruns"
       },
       "run": {
-        "ranAt": "2026-09-29T12:19:01.426Z",
-        "commit": "96df6ef6",
+        "ranAt": "2026-10-02T04:02:46.244Z",
+        "commit": "845fe328",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
         "platform": "linux-x64",
-        "distBuiltAt": "2026-09-28T12:20:01.666Z",
+        "distBuiltAt": "2026-10-02T04:01:06.713Z",
         "thresholds": {
           "minVoices": 64
         }
@@ -313,9 +313,9 @@
             "startsBefore": 13,
             "startsAfter": 12,
             "sameFrequencyAfter": true,
-            "recordedSamples": 295424,
-            "failureIndex": 151552,
-            "firstNote": 11941,
+            "recordedSamples": 289280,
+            "failureIndex": 144896,
+            "firstNote": 5794,
             "ownGapFrames": 1,
             "longestGapFrames": 1,
             "gapExcessFrames": 0
@@ -324,7 +324,7 @@
             "name": "eval-time throw",
             "steadyError": "",
             "errorReported": true,
-            "errorMessage": "Error: boom",
+            "errorMessage": "Error: boom (1:61)",
             "startsBefore": 13,
             "startsAfter": 12,
             "sameFrequencyAfter": true,
@@ -343,9 +343,9 @@
             "startsBefore": 13,
             "startsAfter": 12,
             "sameFrequencyAfter": true,
-            "recordedSamples": 288768,
-            "failureIndex": 144384,
-            "firstNote": 5282,
+            "recordedSamples": 288256,
+            "failureIndex": 143872,
+            "firstNote": 5278,
             "ownGapFrames": 1,
             "longestGapFrames": 1,
             "gapExcessFrames": 0
@@ -359,13 +359,13 @@
         "gap": "longest run of |x| < 1e-4 after the first note, minus the longest such run before the failure (the pattern own silence)"
       },
       "run": {
-        "ranAt": "2026-10-02T03:53:57.991Z",
-        "commit": "73d29e35",
+        "ranAt": "2026-10-02T04:02:46.244Z",
+        "commit": "845fe328",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
         "platform": "linux-x64",
-        "distBuiltAt": "2026-10-02T03:52:39.924Z",
+        "distBuiltAt": "2026-10-02T04:01:06.713Z",
         "thresholds": {
           "maxGapFrames": 128
         }
@@ -385,13 +385,13 @@
         }
       },
       "run": {
-        "ranAt": "2026-09-29T12:19:01.426Z",
-        "commit": "96df6ef6",
+        "ranAt": "2026-10-02T04:02:46.244Z",
+        "commit": "845fe328",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
         "platform": "linux-x64",
-        "distBuiltAt": "2026-09-28T12:20:01.666Z",
+        "distBuiltAt": "2026-10-02T04:01:06.713Z",
         "thresholds": {}
       }
     },
@@ -404,13 +404,13 @@
         "reason": "headless Chromium has no MIDI output devices"
       },
       "run": {
-        "ranAt": "2026-09-29T12:19:01.426Z",
-        "commit": "96df6ef6",
+        "ranAt": "2026-10-02T04:02:46.244Z",
+        "commit": "845fe328",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
         "platform": "linux-x64",
-        "distBuiltAt": "2026-09-28T12:20:01.666Z",
+        "distBuiltAt": "2026-10-02T04:01:06.713Z",
         "thresholds": {
           "maxJitterMs": 2
         }
@@ -440,20 +440,20 @@
         "engine": "superdough"
       },
       "run": {
-        "ranAt": "2026-09-29T12:19:01.426Z",
-        "commit": "96df6ef6",
+        "ranAt": "2026-10-02T04:02:46.244Z",
+        "commit": "845fe328",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
         "platform": "linux-x64",
-        "distBuiltAt": "2026-09-28T12:20:01.666Z",
+        "distBuiltAt": "2026-10-02T04:01:06.713Z",
         "thresholds": {
           "maxCents": 1
         }
       }
     },
     "LANG-1": {
-      "status": "fail",
+      "status": "pass",
       "metrics": {
         "cases": [
           {
@@ -472,59 +472,58 @@
           },
           {
             "name": "unknown function",
-            "message": "note(...).s(...).notAFunction is not a function",
+            "message": "note(...).s(...).notAFunction is not a function (3:3)",
             "expected": {
               "line": 3,
               "column": 3
             },
             "reported": {
               "line": 3,
-              "column": 77,
-              "source": "stack"
+              "column": 3,
+              "source": "loc"
             },
-            "exact": false
+            "exact": true
           }
         ],
-        "exact": 1,
-        "headline": "1/2 exact"
+        "exact": 2,
+        "headline": "2/2 exact"
       },
       "notes": {
-        "surface": "strudelMirror.evaluate(); repl.state.error",
-        "error": "unknown function: reported {\"line\":3,\"column\":77,\"source\":\"stack\"}"
+        "surface": "strudelMirror.evaluate(); repl.state.error"
       },
       "run": {
-        "ranAt": "2026-09-29T12:19:01.426Z",
-        "commit": "96df6ef6",
+        "ranAt": "2026-10-02T04:02:46.244Z",
+        "commit": "845fe328",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
         "platform": "linux-x64",
-        "distBuiltAt": "2026-09-28T12:20:01.666Z",
+        "distBuiltAt": "2026-10-02T04:01:06.713Z",
         "thresholds": {}
       }
     },
     "BUILD-0": {
       "status": "pass",
       "metrics": {
-        "builtAt": "2026-09-28T12:20:01.666Z",
+        "builtAt": "2026-10-02T04:01:06.713Z",
         "sourceCommit": {
-          "sha": "8f81463b9cb5ddd5f117ed7baef6a1fde9445dc2",
-          "committedAt": "2026-08-19T21:22:18+02:00"
+          "sha": "379f2ad2ebd856e0cab07488bad17b61f3e3c9eb",
+          "committedAt": "2026-10-02T05:55:32+02:00"
         },
-        "headline": "dist 2026-09-28",
+        "headline": "dist 2026-10-02",
         "starts": 1
       },
       "notes": {
         "scope": "uses the existing website/dist; the probe did not rebuild. Passes only if the dist was built after the newest commit touching packages/ or website/ (uncommitted edits are not covered)"
       },
       "run": {
-        "ranAt": "2026-09-29T12:19:01.426Z",
-        "commit": "96df6ef6",
+        "ranAt": "2026-10-02T04:02:46.244Z",
+        "commit": "845fe328",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
         "platform": "linux-x64",
-        "distBuiltAt": "2026-09-28T12:20:01.666Z",
+        "distBuiltAt": "2026-10-02T04:01:06.713Z",
         "thresholds": {}
       }
     }
