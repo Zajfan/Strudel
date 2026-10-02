@@ -21,6 +21,8 @@ tauri = { version = "2", features = [] }
 midir = "0.9.1"
 tokio = { version = "1.29.0", features = ["full"] }
 rosc = "0.10.1"
+cpal = "0.15"
+rtrb = "0.4"
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"

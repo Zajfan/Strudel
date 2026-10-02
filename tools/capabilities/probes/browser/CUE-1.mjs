@@ -16,8 +16,9 @@ const MIN_SEPARATION_DB = 40;
 const PRESENT_DB = -60;
 
 // Runs in the page; serialized with toString(), so no closures over Node scope.
-async function cueInPage({ code, seconds }) {
+async function cueInPage({ code, seconds, device }) {
   if (typeof setCueDevice !== 'function') return { missing: 'setCueDevice' };
+  const native = window.__TAURI_INTERNALS__;
   const ctx = getAudioContext();
   if (ctx.state !== 'running') await ctx.resume();
   const controller = getSuperdoughAudioController();
@@ -37,11 +38,18 @@ async function cueInPage({ code, seconds }) {
   await ctx.audioWorklet.addModule(url);
   URL.revokeObjectURL(url);
   const cueOutput = controller.getCueOutput();
-  await setCueDevice('System Standard');
+  await setCueDevice(device);
+  // desktop: also keep what the native backend hands to the device
+  if (native) await native.invoke('cue_capture', { start: true });
   const recorder = new AudioWorkletNode(ctx, name, { numberOfInputs: 2, numberOfOutputs: 1 });
   const sink = new GainNode(ctx, { gain: 0 });
   const mainTap = controller.output.destinationGain;
-  const cueTap = new MediaStreamAudioSourceNode(ctx, { mediaStream: cueOutput.destination.stream });
+  // the cue mix: the provider's destination itself if it passes audio on (native), else the stream
+  // the browser's <audio> element plays
+  const cueTap =
+    cueOutput.destination.numberOfOutputs > 0
+      ? cueOutput.destination
+      : new MediaStreamAudioSourceNode(ctx, { mediaStream: cueOutput.destination.stream });
   mainTap.connect(recorder, 0, 0);
   cueTap.connect(recorder, 0, 1);
   recorder.connect(sink).connect(ctx.destination);
@@ -60,7 +68,7 @@ async function cueInPage({ code, seconds }) {
   } finally {
     m.stop();
     mainTap.disconnect(recorder);
-    cueTap.disconnect();
+    cueTap.disconnect(recorder);
     recorder.disconnect();
     sink.disconnect();
   }
@@ -70,12 +78,20 @@ async function cueInPage({ code, seconds }) {
     for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
     return btoa(binary);
   };
+  let device_ = null;
+  if (native) {
+    // interleaved stereo f32 of the blocks the device played; the left channel is enough
+    const bytes = new Uint8Array(await native.invoke('cue_capture', { start: false }));
+    const all = new Float32Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 4);
+    const left = all.filter((_, i) => i % 2 === 0);
+    const stats = await native.invoke('cue_stats');
+    device_ = { left: b64(left), stats };
+  }
   return {
     sampleRate: ctx.sampleRate,
     main: b64(recorded[0]),
     cue: b64(recorded[1]),
-    sinkId: cueOutput.audio.sinkId,
-    cuePlaying: !cueOutput.audio.paused,
+    device: device_,
   };
 }
 
@@ -84,20 +100,30 @@ export async function probe({ page }) {
     code: CODE,
     scope: 'headless Chromium, one fake output device: the cue stream is verified, a second physical device is not',
   };
-  // the cue plays through an <audio> element on another device: without setSinkId on media elements
-  // (WebKitGTK, so the desktop app) the engine cannot do that at all
-  const setSinkId = await page.evaluate(() => typeof HTMLMediaElement.prototype.setSinkId);
-  if (setSinkId !== 'function') {
+  // a cue needs an output on another device: the browser's <audio> + setSinkId, or a native one
+  const engine = await page.evaluate(async () => ({
+    canCue: typeof canCue === 'function' ? canCue() : null,
+    setSinkId: typeof HTMLMediaElement.prototype.setSinkId,
+    native: !!window.__TAURI_INTERNALS__,
+    // listed only for the native cue: the browser's listing asks for the microphone (device labels)
+    devices: window.__TAURI_INTERNALS__ && typeof getCueDevices === 'function' ? await getCueDevices() : [],
+  }));
+  if (!engine.canCue) {
     return {
       status: 'wall',
-      metrics: { setSinkId, headline: 'no setSinkId on media elements' },
+      metrics: { setSinkId: engine.setSinkId, headline: 'no cue output in this engine' },
       notes: {
         ...notes,
-        evidence: `HTMLMediaElement.prototype.setSinkId is ${setSinkId} in this engine, so no element can play on a second output device; a cue needs a native audio output here`,
+        evidence: `HTMLMediaElement.prototype.setSinkId is ${engine.setSinkId} and no native cue output is registered, so nothing can play on a second device`,
       },
     };
   }
-  const out = await page.evaluate(cueInPage, { code: CODE, seconds: SECONDS }, { timeoutMs: (SECONDS + 60) * 1000 });
+  // desktop: the silent ALSA device the harness provides, so the cue isn't heard on the speakers
+  const device = engine.native ? 'strudel_null' : 'System Standard';
+  if (engine.native && !engine.devices.includes(device)) {
+    return { status: 'not-run', metrics: { devices: engine.devices }, notes: { ...notes, reason: `no "${device}" device for a silent native cue (see the desktop harness)` } };
+  }
+  const out = await page.evaluate(cueInPage, { code: CODE, seconds: SECONDS, device }, { timeoutMs: (SECONDS + 60) * 1000 });
   if (out.missing) return { status: 'fail', metrics: { headline: `no ${out.missing}` }, notes: { ...notes, error: `no ${out.missing} in the page` } };
   if (out.error) return { status: 'fail', metrics: {}, notes: { ...notes, error: out.error } };
   const main = decodeFloat32(out.main);
@@ -105,13 +131,13 @@ export async function probe({ page }) {
   const level = (samples) => ({ main: toneDb(samples, out.sampleRate, MAIN_FREQ), cue: toneDb(samples, out.sampleRate, CUE_FREQ) });
   const onMain = level(main);
   const onCue = level(cue);
+  const onDevice = out.device ? level(decodeFloat32(out.device.left)) : null;
   const metrics = {
     mainOutput: onMain,
     cueOutput: onCue,
     separationOnMainDb: onMain.main - onMain.cue,
     separationOnCueDb: onCue.cue - onCue.main,
-    cuePlaying: out.cuePlaying,
-    sinkId: out.sinkId,
+    ...(out.device && { deviceOutput: onDevice, separationOnDeviceDb: onDevice.cue - onDevice.main, deviceStats: out.device.stats }),
     recordedSamples: main.length,
   };
   metrics.headline = `cue ${metrics.separationOnMainDb.toFixed(0)} dB below main on the main output, main ${metrics.separationOnCueDb.toFixed(0)} dB below cue on the cue`;
@@ -120,6 +146,9 @@ export async function probe({ page }) {
   if (!(onCue.cue > PRESENT_DB)) return fail('the cued pattern is missing from the cue output');
   if (!(metrics.separationOnMainDb >= MIN_SEPARATION_DB)) return fail(`the cued pattern is audible on the main output (${metrics.separationOnMainDb.toFixed(1)} dB)`);
   if (!(metrics.separationOnCueDb >= MIN_SEPARATION_DB)) return fail(`the main pattern leaks into the cue (${metrics.separationOnCueDb.toFixed(1)} dB)`);
-  if (!out.cuePlaying) return fail('the cue <audio> element is not playing');
+  if (out.device) {
+    if (!(onDevice.cue > PRESENT_DB)) return fail('the native cue output played no cue on the device');
+    if (!(metrics.separationOnDeviceDb >= MIN_SEPARATION_DB)) return fail(`the main pattern leaks into the device cue (${metrics.separationOnDeviceDb.toFixed(1)} dB)`);
+  }
   return { status: 'pass', metrics, notes };
 }

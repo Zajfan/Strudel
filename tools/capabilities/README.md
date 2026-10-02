@@ -95,7 +95,7 @@ actions nor element clicks in the embedded webview.
 
 The app never reaches the user's session: `WAYLAND_DISPLAY` is removed and `GDK_BACKEND=x11` keeps
 the window on Xvfb (otherwise GTK opens it on the real Wayland desktop), and
-`GST_PLUGIN_FEATURE_RANK=fakeaudiosink:MAX` sends WebKitGTK's audio to a silent GStreamer sink.
+`GST_PLUGIN_FEATURE_RANK=fakeaudiosink:MAX` sends WebKitGTK's audio to a silent GStreamer sink. The app's native audio (the cue) gets `ALSA_CONFIG_PATH` with an extra silent device, `strudel_null`, which the probes select.
 
 Prerequisites: `Xvfb`, `WebKitWebDriver` (WebKitGTK), `tauri-driver` (`cargo install
 tauri-driver --locked`), the Tauri 2 Linux libraries (webkit2gtk-4.1, libsoup-3.0), and for

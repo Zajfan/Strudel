@@ -5,9 +5,11 @@
 //
 // Isolation from the user's session: WAYLAND_DISPLAY is removed and GDK_BACKEND=x11 forces the
 // window onto Xvfb (otherwise GTK opens it on the real desktop), and GStreamer's automatic audio
-// sink is pointed at fakeaudiosink, so nothing plays on the speakers.
+// sink is pointed at fakeaudiosink, so nothing plays on the speakers. The app's native audio (the cue,
+// src-tauri/src/audio) gets an ALSA config with a silent device, "strudel_null", that probes use.
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
 
@@ -23,8 +25,19 @@ const freePort = () =>
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// The system ALSA config plus a device that discards audio (cpal doesn't list ALSA's own "null").
+function silentAlsaConfig() {
+  const path = join(tmpdir(), 'strudel-caps-asound.conf');
+  writeFileSync(
+    path,
+    '</usr/share/alsa/alsa.conf>\npcm.strudel_null { type null; hint { show on; description "Strudel test sink (discards audio)" } }\n',
+  );
+  return path;
+}
+
 export function appEnv(display) {
   const env = { ...process.env, DISPLAY: display, GDK_BACKEND: 'x11' };
+  if (existsSync('/usr/share/alsa/alsa.conf')) env.ALSA_CONFIG_PATH = silentAlsaConfig();
   delete env.WAYLAND_DISPLAY;
   Object.assign(env, {
     WEBKIT_DISABLE_DMABUF_RENDERER: '1',

@@ -195,8 +195,23 @@ export class SuperdoughOutput {
 }
 
 // The cue (headphone) output: a second output device for patterns with `cue`, inaudible on the
-// main output. An AudioContext has one output device, so the cue mix leaves the context as a
-// MediaStream and plays through an <audio> element, whose own device is set with setSinkId.
+// main output. Where it plays is up to a cue output provider (setCueOutputProvider):
+//   { available(): boolean, create(audioContext) -> output, listDevices(): Promise<string[]> }
+// and an output is
+//   { destination: AudioNode (the cue mix goes in here), setDevice(name): Promise, disconnect() }
+// with device names as listDevices gives them; null or '' is the system default. The default
+// provider is set in superdough.mjs (CueOutput below); the desktop app registers a native one.
+let cueOutputProvider;
+export function setCueOutputProvider(provider) {
+  cueOutputProvider = provider;
+}
+export function getCueOutputProvider() {
+  return cueOutputProvider;
+}
+
+// The browser's cue output: an AudioContext has one output device, so the cue mix leaves the
+// context as a MediaStream and plays through an <audio> element, whose own device is set with
+// setSinkId (by device id).
 export class CueOutput {
   constructor(audioContext) {
     this.destination = audioContext.createMediaStreamDestination();
@@ -225,7 +240,7 @@ export class SuperdoughAudioController {
   cueNodes = {}; // orbits of cued patterns, connected to the cue output
   buses = {};
   cueOutput; // created when the first cued sound plays
-  cueDeviceId = '';
+  cueDeviceName = null;
 
   constructor(audioContext) {
     this.audioContext = audioContext;
@@ -250,17 +265,17 @@ export class SuperdoughAudioController {
 
   getCueOutput() {
     if (this.cueOutput == null) {
-      this.cueOutput = new CueOutput(this.audioContext);
-      if (this.cueDeviceId) {
-        this.cueOutput.setDevice(this.cueDeviceId).catch((err) => errorLogger(err, 'superdough'));
+      this.cueOutput = cueOutputProvider.create(this.audioContext);
+      if (this.cueDeviceName) {
+        this.cueOutput.setDevice(this.cueDeviceName).catch((err) => errorLogger(err, 'superdough'));
       }
     }
     return this.cueOutput;
   }
 
-  async setCueDevice(deviceId) {
-    this.cueDeviceId = deviceId;
-    await this.cueOutput?.setDevice(deviceId);
+  async setCueDevice(deviceName) {
+    this.cueDeviceName = deviceName;
+    await this.cueOutput?.setDevice(deviceName);
   }
 
   duck(targetOrbits, t, onsettime = 0, attacktime = 0.1, depth = 1) {

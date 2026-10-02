@@ -92,6 +92,8 @@ export function loadModules() {
       import('@strudel/desktopbridge/loggerbridge.mjs'),
       import('@strudel/desktopbridge/midibridge.mjs'),
       import('@strudel/desktopbridge/oscbridge.mjs'),
+      // the cue plays through the native backend: the webview can't use a second device
+      import('@strudel/desktopbridge/cue.mjs'),
     ]);
   } else {
     modules = modules.concat([import('@strudel/midi'), import('@strudel/osc')]);

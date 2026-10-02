@@ -27,7 +27,8 @@ import { logger } from './logger.mjs';
 import { connectLFO, connectEnvelope, connectBusModulator, connectAutomation } from './modulators.mjs';
 import { getSampleBufferSource, loadBuffer } from './sampler.mjs';
 import { getAudioContext } from './audioContext.mjs';
-import { SuperdoughAudioController } from './superdoughoutput.mjs';
+import { CueOutput, SuperdoughAudioController, getCueOutputProvider, setCueOutputProvider } from './superdoughoutput.mjs';
+export { setCueOutputProvider, getCueOutputProvider };
 import { resetSeenKeys } from './wavetable.mjs';
 
 export const DEFAULT_MAX_POLYPHONY = 128;
@@ -353,14 +354,33 @@ export function setSuperdoughAudioController(newController) {
   return controller;
 }
 
-// Chooses the output device of the cue (patterns with `cue`), by its name as getAudioDevices lists
-// it; DEFAULT_AUDIO_DEVICE_NAME (or an unknown name) is the system default.
+// The default cue output provider: the browser's MediaStream + <audio> + setSinkId (CueOutput).
+setCueOutputProvider({
+  available: () => typeof HTMLMediaElement !== 'undefined' && typeof HTMLMediaElement.prototype.setSinkId === 'function',
+  create(audioContext) {
+    const output = new CueOutput(audioContext);
+    return {
+      destination: output.destination,
+      // listed by name; setSinkId takes the id. DEFAULT_AUDIO_DEVICE_NAME (or unknown) is the default
+      async setDevice(name) {
+        const id = name && name !== DEFAULT_AUDIO_DEVICE_NAME ? ((await getAudioDevices()).get(name) ?? '') : '';
+        await output.setDevice(id);
+      },
+      disconnect: () => output.disconnect(),
+    };
+  },
+  listDevices: async () => [...(await getAudioDevices()).keys()],
+});
+
+// whether this engine can play patterns with `cue` on a device of their own
+export const canCue = () => getCueOutputProvider().available();
+// the devices the cue can play on, by name
+export const getCueDevices = () => getCueOutputProvider().listDevices();
+
+// Chooses the output device of the cue (patterns with `cue`), by its name as getCueDevices lists it;
+// DEFAULT_AUDIO_DEVICE_NAME is the system default.
 export async function setCueDevice(deviceName) {
-  let id = '';
-  if (deviceName != null && deviceName !== DEFAULT_AUDIO_DEVICE_NAME) {
-    id = (await getAudioDevices()).get(deviceName) ?? '';
-  }
-  await getSuperdoughAudioController().setCueDevice(id);
+  await getSuperdoughAudioController().setCueDevice(deviceName === DEFAULT_AUDIO_DEVICE_NAME ? null : deviceName);
 }
 
 export function connectToDestination(input, channels) {

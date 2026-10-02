@@ -427,32 +427,30 @@
       "status": "pass",
       "metrics": {
         "mainOutput": {
-          "main": -42.30746175786339,
-          "cue": -97.01944201459754
+          "main": -42.203543373453115,
+          "cue": -99.16010765009126
         },
         "cueOutput": {
-          "main": -103.91999011470375,
-          "cue": -25.402087205634686
+          "main": -103.58315504066434,
+          "cue": -25.49291872283832
         },
-        "separationOnMainDb": 54.71198025673415,
-        "separationOnCueDb": 78.51790290906906,
-        "cuePlaying": true,
-        "sinkId": "",
-        "recordedSamples": 144896,
-        "headline": "cue 55 dB below main on the main output, main 79 dB below cue on the cue"
+        "separationOnMainDb": 56.95656427663815,
+        "separationOnCueDb": 78.09023631782603,
+        "recordedSamples": 146944,
+        "headline": "cue 57 dB below main on the main output, main 78 dB below cue on the cue"
       },
       "notes": {
         "code": "$: note(\"c3*4\").s(\"sine\").gain(0.3)\n$: note(\"a5*4\").s(\"sine\").gain(0.3).cue()",
         "scope": "headless Chromium, one fake output device: the cue stream is verified, a second physical device is not"
       },
       "run": {
-        "ranAt": "2026-10-02T11:41:02.408Z",
-        "commit": "54d20dc7",
+        "ranAt": "2026-10-02T17:53:24.231Z",
+        "commit": "05be049f",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
         "platform": "linux-x64",
-        "distBuiltAt": "2026-10-02T11:27:19.583Z",
+        "distBuiltAt": "2026-10-02T17:51:55.497Z",
         "thresholds": {}
       }
     },

@@ -5,8 +5,9 @@ import { getAudioDevices } from '@strudel/webaudio';
 
 const initdevices = new Map();
 
-// Allows the user to select an audio interface for Strudel to play through
-export function AudioDeviceSelector({ audioDeviceName, onChange, isDisabled }) {
+// Allows the user to select an audio interface for Strudel to play through. getDevices resolves to
+// the device names (a Map's keys, or an array); by default the browser's output devices.
+export function AudioDeviceSelector({ audioDeviceName, onChange, isDisabled, getDevices = getAudioDevices }) {
   const [devices, setDevices] = useState(initdevices);
   const devicesInitialized = devices.size > 0;
 
@@ -14,8 +15,9 @@ export function AudioDeviceSelector({ audioDeviceName, onChange, isDisabled }) {
     if (devicesInitialized) {
       return;
     }
-    getAudioDevices().then((devices) => {
-      setDevices(devices);
+    getDevices().then((devices) => {
+      const names = devices instanceof Map ? [...devices.keys()] : devices;
+      setDevices(new Map(names.map((name) => [name, name])));
     });
   };
   const onDeviceChange = (deviceName) => {

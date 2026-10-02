@@ -1,6 +1,7 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod audio;
 mod midibridge;
 mod oscbridge;
 mod loggerbridge;
@@ -31,7 +32,19 @@ fn main() {
     .plugin(tauri_plugin_clipboard_manager::init())
     .plugin(tauri_plugin_dialog::init())
     .plugin(tauri_plugin_fs::init())
-    .invoke_handler(tauri::generate_handler![midibridge::sendmidi, oscbridge::sendosc])
+    .manage(audio::cue::CueState::default())
+    .invoke_handler(
+      tauri::generate_handler![
+        midibridge::sendmidi,
+        oscbridge::sendosc,
+        audio::cue_devices,
+        audio::cue_start,
+        audio::cue_stop,
+        audio::cue_write,
+        audio::cue_stats,
+        audio::cue_capture
+      ]
+    )
     .setup(|app| {
       let window = Arc::new(app.get_webview_window("main").unwrap());
       let logger = Logger { window };

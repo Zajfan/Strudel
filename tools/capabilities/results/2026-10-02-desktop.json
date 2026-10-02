@@ -417,19 +417,44 @@
       }
     },
     "CUE-1": {
-      "status": "wall",
+      "status": "pass",
       "metrics": {
-        "setSinkId": "undefined",
-        "headline": "no setSinkId on media elements"
+        "mainOutput": {
+          "main": -41.9342496058318,
+          "cue": -96.85351165390227
+        },
+        "cueOutput": {
+          "main": -111.2767430133112,
+          "cue": -25.35350530310986
+        },
+        "separationOnMainDb": 54.91926204807047,
+        "separationOnCueDb": 85.92323771020135,
+        "deviceOutput": {
+          "main": -95.91664372334799,
+          "cue": -48.381462956983995
+        },
+        "separationOnDeviceDb": 47.53518076636399,
+        "deviceStats": {
+          "sampleRate": 44100,
+          "underruns": 46,
+          "running": true,
+          "fillMs": 38.93424036281179,
+          "device": "strudel_null",
+          "framesPlayed": 135440,
+          "framesDropped": 0,
+          "channels": 2,
+          "framesRepeated": 965
+        },
+        "recordedSamples": 134272,
+        "headline": "cue 55 dB below main on the main output, main 86 dB below cue on the cue"
       },
       "notes": {
         "code": "$: note(\"c3*4\").s(\"sine\").gain(0.3)\n$: note(\"a5*4\").s(\"sine\").gain(0.3).cue()",
-        "scope": "headless Chromium, one fake output device: the cue stream is verified, a second physical device is not",
-        "evidence": "HTMLMediaElement.prototype.setSinkId is undefined in this engine, so no element can play on a second output device; a cue needs a native audio output here"
+        "scope": "headless Chromium, one fake output device: the cue stream is verified, a second physical device is not"
       },
       "run": {
-        "ranAt": "2026-10-02T11:43:57.174Z",
-        "commit": "54d20dc7",
+        "ranAt": "2026-10-02T17:52:52.928Z",
+        "commit": "05be049f",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
@@ -585,14 +610,14 @@
       "status": "pass",
       "metrics": {
         "exitCode": 0,
-        "seconds": 0,
+        "seconds": 1,
         "scope": "cargo check --locked (backend type-check only)",
-        "headline": "cargo check 0 s"
+        "headline": "cargo check 1 s"
       },
       "notes": {},
       "run": {
-        "ranAt": "2026-10-02T11:43:57.174Z",
-        "commit": "54d20dc7",
+        "ranAt": "2026-10-02T17:53:40.622Z",
+        "commit": "05be049f",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
