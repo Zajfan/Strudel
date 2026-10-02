@@ -1,0 +1,532 @@
+{
+  "tier": "browser",
+  "date": "2026-10-02",
+  "node": "v22.21.1",
+  "platform": "linux-x64",
+  "results": {
+    "ARR-1": {
+      "status": "pass",
+      "metrics": {
+        "sections": 8,
+        "bars": 64,
+        "candidates": [
+          {
+            "name": "arrange()",
+            "eventsInSong": 64,
+            "wrongSection": 0,
+            "eventsAfterEnd": 8
+          },
+          {
+            "name": "arrange() + filterWhen(t < 64)",
+            "eventsInSong": 64,
+            "wrongSection": 0,
+            "eventsAfterEnd": 0
+          },
+          {
+            "name": "arrange() + silence tail",
+            "eventsInSong": 64,
+            "wrongSection": 0,
+            "eventsAfterEnd": 0
+          }
+        ],
+        "headline": "8 sections, 64 bars via arrange() + filterWhen(t < 64)"
+      },
+      "notes": {
+        "ergonomics": "bare arrange() loops: 8 events after bar 64; a hard ending needs an extra construct (filterWhen or a silence tail)",
+        "construct": "arrange() + filterWhen(t < 64)"
+      },
+      "run": {
+        "ranAt": "2026-09-29T12:19:01.426Z",
+        "commit": "96df6ef6",
+        "dirty": true,
+        "source": "probe",
+        "node": "v22.21.1",
+        "platform": "linux-x64",
+        "distBuiltAt": "2026-09-28T12:20:01.666Z",
+        "thresholds": {}
+      }
+    },
+    "MIX-1": {
+      "status": "not-run",
+      "metrics": {
+        "triggers": 3,
+        "drops": [
+          {
+            "atSample": 18302,
+            "beforeRms": 0.10757157744985496,
+            "afterRms": 0.002276125185450208,
+            "dropDb": 33.49002785890473
+          },
+          {
+            "atSample": 66302,
+            "beforeRms": 0.10757157744985496,
+            "afterRms": 0.002276125185450208,
+            "dropDb": 33.49002785890473
+          },
+          {
+            "atSample": 114302,
+            "beforeRms": 0.10757157744985496,
+            "afterRms": 0.002276125185450208,
+            "dropDb": 33.49002785890473
+          }
+        ],
+        "dropDb": 33.49002785890473,
+        "beforeRms": 0.10757157744985496,
+        "recordedSamples": 145408,
+        "sampleRate": 48000,
+        "offlineDropDb": 16.008822261369737,
+        "headline": "33.5 dB duck (live)"
+      },
+      "notes": {
+        "engine": "superdough",
+        "scope": "live playback in headless Chromium with a fake audio device; ducking only, buses and sends are not separately observable in a stereo mix",
+        "tap": "AudioWorklet recorder on getSuperdoughAudioController().output.destinationGain (master mix, channel 0); median drop over orbit-2 trigger starts; tempo via setcps(1) in the REPL code",
+        "offlineExport": "renderPatternAudio renders in 1-cycle chunks and superdough fires duck() from a main-thread webAudioTimeout callback, so in an export the duck lands wherever the main thread catches up (at chunk boundaries, or past the render) instead of at the trigger; offlineDropDb therefore varies from run to run",
+        "reason": "partial: ducking verified; 4 buses + send not verified by this probe"
+      },
+      "run": {
+        "ranAt": "2026-09-29T12:19:01.426Z",
+        "commit": "96df6ef6",
+        "dirty": true,
+        "source": "probe",
+        "node": "v22.21.1",
+        "platform": "linux-x64",
+        "distBuiltAt": "2026-09-28T12:20:01.666Z",
+        "thresholds": {
+          "minDuckDb": 6
+        }
+      }
+    },
+    "AUT-1": {
+      "status": "fail",
+      "metrics": {
+        "events": 16,
+        "maxErrorMs": 0.041666666666666664,
+        "increasing": true,
+        "onsets": [
+          {
+            "expected": 0,
+            "found": 2,
+            "errorMs": 0.041666666666666664
+          },
+          {
+            "expected": 3000,
+            "found": 3002,
+            "errorMs": 0.041666666666666664
+          },
+          {
+            "expected": 6000,
+            "found": 6001,
+            "errorMs": 0.020833333333333332
+          },
+          {
+            "expected": 9000,
+            "found": 9001,
+            "errorMs": 0.020833333333333332
+          },
+          {
+            "expected": 12000,
+            "found": 12001,
+            "errorMs": 0.020833333333333332
+          },
+          {
+            "expected": 15000,
+            "found": 15001,
+            "errorMs": 0.020833333333333332
+          },
+          {
+            "expected": 18000,
+            "found": 18001,
+            "errorMs": 0.020833333333333332
+          },
+          {
+            "expected": 21000,
+            "found": 21001,
+            "errorMs": 0.020833333333333332
+          },
+          {
+            "expected": 24000,
+            "found": 24001,
+            "errorMs": 0.020833333333333332
+          },
+          {
+            "expected": 27000,
+            "found": 27001,
+            "errorMs": 0.020833333333333332
+          },
+          {
+            "expected": 30000,
+            "found": 30001,
+            "errorMs": 0.020833333333333332
+          },
+          {
+            "expected": 33000,
+            "found": 33001,
+            "errorMs": 0.020833333333333332
+          },
+          {
+            "expected": 36000,
+            "found": 36001,
+            "errorMs": 0.020833333333333332
+          },
+          {
+            "expected": 39000,
+            "found": 39001,
+            "errorMs": 0.020833333333333332
+          },
+          {
+            "expected": 42000,
+            "found": 42001,
+            "errorMs": 0.020833333333333332
+          },
+          {
+            "expected": 45000,
+            "found": 45001,
+            "errorMs": 0.020833333333333332
+          }
+        ],
+        "ramp": {
+          "firstRms": 0.021213200196507603,
+          "lastRms": 0.021213200205587816,
+          "changeDb": 3.717954903225806e-9
+        },
+        "headline": "stepped only"
+      },
+      "notes": {
+        "engine": "superdough",
+        "resolution": "measures onset timing of 16 stepped values per cycle, one per event",
+        "error": "automation is sampled once per event; no continuous ramp within a held note"
+      },
+      "run": {
+        "ranAt": "2026-09-29T12:19:01.426Z",
+        "commit": "96df6ef6",
+        "dirty": true,
+        "source": "probe",
+        "node": "v22.21.1",
+        "platform": "linux-x64",
+        "distBuiltAt": "2026-09-28T12:20:01.666Z",
+        "thresholds": {
+          "maxErrorMs": 1
+        }
+      }
+    },
+    "EXP-1": {
+      "status": "fail",
+      "metrics": {
+        "events": 1115,
+        "rms": 0.10703429219853593,
+        "lengthSamples": 3072000,
+        "expectedLength": 3072000,
+        "secondLength": 3072000,
+        "hashes": [
+          "44ca9ba2",
+          "32b89ea7"
+        ],
+        "firstDifferenceLeft": 1,
+        "channels": 2,
+        "headline": "non-deterministic"
+      },
+      "notes": {
+        "renderer": "renderPatternAudio (superdough, OfflineAudioContext)",
+        "scope": "left channel hashed; render has no tail",
+        "error": "renders differ from sample 1 (0.000 s): length 3072000 vs 3072000, FNV-1a 44ca9ba2 vs 32b89ea7"
+      },
+      "run": {
+        "ranAt": "2026-09-29T12:19:01.426Z",
+        "commit": "96df6ef6",
+        "dirty": true,
+        "source": "probe",
+        "node": "v22.21.1",
+        "platform": "linux-x64",
+        "distBuiltAt": "2026-09-28T12:20:01.666Z",
+        "thresholds": {
+          "minRms": 0.001
+        }
+      }
+    },
+    "EXP-2": {
+      "status": "fail",
+      "metrics": {
+        "stemApis": [],
+        "renderChannels": 2,
+        "renderPatternAudioArity": 7,
+        "headline": "no stem API"
+      },
+      "notes": {
+        "renderPatternAudio": "has a multiChannelOrbits parameter, but renders into new OfflineAudioContext(2, ...) and downloads one stereo WAV",
+        "error": "no stem export API"
+      },
+      "run": {
+        "ranAt": "2026-09-29T12:19:01.426Z",
+        "commit": "96df6ef6",
+        "dirty": true,
+        "source": "probe",
+        "node": "v22.21.1",
+        "platform": "linux-x64",
+        "distBuiltAt": "2026-09-28T12:20:01.666Z",
+        "thresholds": {
+          "maxResidualDbfs": -60
+        }
+      }
+    },
+    "PERF-1": {
+      "status": "pass",
+      "metrics": {
+        "voices": 64,
+        "starts": 1984,
+        "expectedMinStarts": 1856,
+        "late": 0,
+        "lateStarts": 0,
+        "droppedPastHaps": 0,
+        "minLeadMs": 99.33333333333336,
+        "silentWindows": 0,
+        "durationS": 60.00016999983787,
+        "cps": 0.5,
+        "analyserCount": 1,
+        "headline": "64 voices, 0 late, 0 silent windows"
+      },
+      "notes": {
+        "scope": "headless Chromium, fake audio device: measures scheduling lateness and rendered signal, not DAC underruns"
+      },
+      "run": {
+        "ranAt": "2026-09-29T12:19:01.426Z",
+        "commit": "96df6ef6",
+        "dirty": true,
+        "source": "probe",
+        "node": "v22.21.1",
+        "platform": "linux-x64",
+        "distBuiltAt": "2026-09-28T12:20:01.666Z",
+        "thresholds": {
+          "minVoices": 64
+        }
+      }
+    },
+    "LIVE-1": {
+      "status": "pass",
+      "metrics": {
+        "cases": [
+          {
+            "name": "syntax error",
+            "steadyError": "",
+            "errorReported": true,
+            "errorMessage": "SyntaxError: Unexpected token (1:63)",
+            "startsBefore": 13,
+            "startsAfter": 12,
+            "sameFrequencyAfter": true,
+            "recordedSamples": 295424,
+            "failureIndex": 151552,
+            "firstNote": 11941,
+            "ownGapFrames": 1,
+            "longestGapFrames": 1,
+            "gapExcessFrames": 0
+          },
+          {
+            "name": "eval-time throw",
+            "steadyError": "",
+            "errorReported": true,
+            "errorMessage": "Error: boom",
+            "startsBefore": 13,
+            "startsAfter": 12,
+            "sameFrequencyAfter": true,
+            "recordedSamples": 288256,
+            "failureIndex": 144384,
+            "firstNote": 5278,
+            "ownGapFrames": 1,
+            "longestGapFrames": 1,
+            "gapExcessFrames": 0
+          },
+          {
+            "name": "query-time throw",
+            "steadyError": "",
+            "errorReported": true,
+            "errorMessage": "Error: q",
+            "startsBefore": 13,
+            "startsAfter": 12,
+            "sameFrequencyAfter": true,
+            "recordedSamples": 288768,
+            "failureIndex": 144384,
+            "firstNote": 5282,
+            "ownGapFrames": 1,
+            "longestGapFrames": 1,
+            "gapExcessFrames": 0
+          }
+        ],
+        "maxGapExcessFrames": 0,
+        "headline": "3/3 cases safe, 0 frame gap"
+      },
+      "notes": {
+        "scope": "headless Chromium, fake audio device: measures the rendered master mix and Web Audio scheduling, not DAC underruns",
+        "gap": "longest run of |x| < 1e-4 after the first note, minus the longest such run before the failure (the pattern own silence)"
+      },
+      "run": {
+        "ranAt": "2026-10-02T03:53:57.991Z",
+        "commit": "73d29e35",
+        "dirty": true,
+        "source": "probe",
+        "node": "v22.21.1",
+        "platform": "linux-x64",
+        "distBuiltAt": "2026-10-02T03:52:39.924Z",
+        "thresholds": {
+          "maxGapFrames": 128
+        }
+      }
+    },
+    "CUE-1": {
+      "status": "fail",
+      "metrics": {
+        "setSinkId": "function",
+        "cueGlobals": [],
+        "headline": "no per-pattern cue"
+      },
+      "notes": {
+        "error": "no per-pattern cue output; one output device for all patterns",
+        "platform": {
+          "setSinkId": "function"
+        }
+      },
+      "run": {
+        "ranAt": "2026-09-29T12:19:01.426Z",
+        "commit": "96df6ef6",
+        "dirty": true,
+        "source": "probe",
+        "node": "v22.21.1",
+        "platform": "linux-x64",
+        "distBuiltAt": "2026-09-28T12:20:01.666Z",
+        "thresholds": {}
+      }
+    },
+    "SYNC-1": {
+      "status": "not-run",
+      "metrics": {
+        "requestMIDIAccess": "function"
+      },
+      "notes": {
+        "reason": "headless Chromium has no MIDI output devices"
+      },
+      "run": {
+        "ranAt": "2026-09-29T12:19:01.426Z",
+        "commit": "96df6ef6",
+        "dirty": true,
+        "source": "probe",
+        "node": "v22.21.1",
+        "platform": "linux-x64",
+        "distBuiltAt": "2026-09-28T12:20:01.666Z",
+        "thresholds": {
+          "maxJitterMs": 2
+        }
+      }
+    },
+    "TUNE-1": {
+      "status": "pass",
+      "metrics": {
+        "cases": [
+          {
+            "name": "19-EDO",
+            "count": 19,
+            "maxCents": 2.952118335527637e-7
+          },
+          {
+            "name": "12-tone just intonation",
+            "count": 12,
+            "maxCents": 2.459139827002702e-7
+          }
+        ],
+        "renderedFreq": 284.00661816520017,
+        "renderedCents": 0.000032814830959075326,
+        "maxCents": 0.000032814830959075326,
+        "headline": "max 0.000 cents"
+      },
+      "notes": {
+        "engine": "superdough"
+      },
+      "run": {
+        "ranAt": "2026-09-29T12:19:01.426Z",
+        "commit": "96df6ef6",
+        "dirty": true,
+        "source": "probe",
+        "node": "v22.21.1",
+        "platform": "linux-x64",
+        "distBuiltAt": "2026-09-28T12:20:01.666Z",
+        "thresholds": {
+          "maxCents": 1
+        }
+      }
+    },
+    "LANG-1": {
+      "status": "fail",
+      "metrics": {
+        "cases": [
+          {
+            "name": "syntax",
+            "message": "Unexpected token (3:12)",
+            "expected": {
+              "line": 3,
+              "column": 12
+            },
+            "reported": {
+              "line": 3,
+              "column": 12,
+              "source": "loc"
+            },
+            "exact": true
+          },
+          {
+            "name": "unknown function",
+            "message": "note(...).s(...).notAFunction is not a function",
+            "expected": {
+              "line": 3,
+              "column": 3
+            },
+            "reported": {
+              "line": 3,
+              "column": 77,
+              "source": "stack"
+            },
+            "exact": false
+          }
+        ],
+        "exact": 1,
+        "headline": "1/2 exact"
+      },
+      "notes": {
+        "surface": "strudelMirror.evaluate(); repl.state.error",
+        "error": "unknown function: reported {\"line\":3,\"column\":77,\"source\":\"stack\"}"
+      },
+      "run": {
+        "ranAt": "2026-09-29T12:19:01.426Z",
+        "commit": "96df6ef6",
+        "dirty": true,
+        "source": "probe",
+        "node": "v22.21.1",
+        "platform": "linux-x64",
+        "distBuiltAt": "2026-09-28T12:20:01.666Z",
+        "thresholds": {}
+      }
+    },
+    "BUILD-0": {
+      "status": "pass",
+      "metrics": {
+        "builtAt": "2026-09-28T12:20:01.666Z",
+        "sourceCommit": {
+          "sha": "8f81463b9cb5ddd5f117ed7baef6a1fde9445dc2",
+          "committedAt": "2026-08-19T21:22:18+02:00"
+        },
+        "headline": "dist 2026-09-28",
+        "starts": 1
+      },
+      "notes": {
+        "scope": "uses the existing website/dist; the probe did not rebuild. Passes only if the dist was built after the newest commit touching packages/ or website/ (uncommitted edits are not covered)"
+      },
+      "run": {
+        "ranAt": "2026-09-29T12:19:01.426Z",
+        "commit": "96df6ef6",
+        "dirty": true,
+        "source": "probe",
+        "node": "v22.21.1",
+        "platform": "linux-x64",
+        "distBuiltAt": "2026-09-28T12:20:01.666Z",
+        "thresholds": {}
+      }
+    }
+  }
+}

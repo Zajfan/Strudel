@@ -12,12 +12,13 @@ import { liveGap } from '../../lib/checks.mjs';
 const SETTLE_SECONDS = 3;
 const STEADY = 'note("c4").s("sine").fast(8).gain(0.05).release(0.01)';
 // The failing programs use e4, so if one of them replaced the steady pattern the pitch would change.
+// Error messages are single-quoted: the transpiler turns double-quoted strings into mini-notation patterns.
 const CASES = [
   { name: 'syntax error', code: 'note("e4").s("sine").fast(8).gain(0.05).release(0.01).lpf(800 +)' },
-  { name: 'eval-time throw', code: 'note("e4").s("sine").fast(8).gain(0.05).release(0.01); throw new Error("boom")' },
+  { name: 'eval-time throw', code: 'note("e4").s("sine").fast(8).gain(0.05).release(0.01); throw new Error(\'boom\')' },
   {
     name: 'query-time throw',
-    code: 'note("e4").s("sine").fast(8).gain(0.05).release(0.01).fmap(() => { throw new Error("q") })',
+    code: 'note("e4").s("sine").fast(8).gain(0.05).release(0.01).fmap(() => { throw new Error(\'q\') })',
   },
 ];
 
