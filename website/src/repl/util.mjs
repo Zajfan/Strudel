@@ -94,6 +94,8 @@ export function loadModules() {
       import('@strudel/desktopbridge/oscbridge.mjs'),
       // the cue plays through the native backend: the webview can't use a second device
       import('@strudel/desktopbridge/cue.mjs'),
+      // CLAP plugins, hosted by the native backend
+      import('@strudel/desktopbridge/clap.mjs'),
     ]);
   } else {
     modules = modules.concat([import('@strudel/midi'), import('@strudel/osc')]);

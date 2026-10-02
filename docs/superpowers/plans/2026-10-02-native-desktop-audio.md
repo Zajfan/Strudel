@@ -31,10 +31,19 @@ WebKitGTK (the desktop webview) cannot play to a second output device (no `setSi
   device. The desktop CUE-1 probe plays to ALSA's `null` device (silent), and checks with the same
   tone analysis as the browser: cue present in the captured device output, absent from the main mix.
 
-## Step 2: live CLAP hosting (PLUG-1 desktop, live)
+## Step 2: live CLAP hosting (PLUG-1 desktop, live) — done 2026-10-02
 
 - `.clap('Surge XT')` (or a `plugin` control) marks a pattern for the native engine: its note
   events go to Rust with absolute Unix-epoch times (as the MIDI bridge does).
 - Rust hosts one plugin instance per name (clack-host, from the PLUG-1 spike), renders in a cpal
   output callback, applies events at their sample offsets, accounting for output latency.
 - Verification: a capture like `cue_capture`, checked for the pattern's notes at the right times.
+
+## Not done yet
+
+- The engine plays on the default output device (or the one passed to `engine_start`); there is no
+  setting for it in the UI yet.
+- Plugins are loaded once and stay loaded for the session; no unloading, no plugin GUIs, no
+  parameter automation (`auto`) or effects on plugin audio yet.
+- Plugin audio and the webview's audio reach the OS mixer separately; their alignment rests on the
+  clock bridge (WebKitGTK's output latency is estimated, not reported).

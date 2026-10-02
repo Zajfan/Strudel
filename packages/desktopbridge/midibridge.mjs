@@ -1,6 +1,5 @@
-import { Invoke } from './utils.mjs';
-import { Pattern, getEventOffsetMs, noteToMidi } from '@strudel/core';
-import { getClockBridge } from '@strudel/webaudio';
+import { Invoke, toEpochMs } from './utils.mjs';
+import { Pattern, noteToMidi } from '@strudel/core';
 
 const ON_MESSAGE = 0x90;
 const OFF_MESSAGE = 0x80;
@@ -8,15 +7,6 @@ const CC_MESSAGE = 0xb0;
 // system real-time messages for midicmd
 const COMMANDS = { clock: 0xf8, midiClock: 0xf8, start: 0xfa, continue: 0xfb, stop: 0xfc };
 
-// When a sound at audio time `targetTime` is heard, as a Unix-epoch time in ms: the clock the Rust
-// side reads too (SystemTime), so messages are scheduled at absolute times and the delay of
-// setTimeout and IPC doesn't move them. Falls back to an offset from now while the clock bridge
-// has no reading yet.
-const toEpochMs = (targetTime, currentTime) => {
-  const performanceTime = getClockBridge().getPerformanceTime(targetTime);
-  const now = performance.timeOrigin + performance.now();
-  return performanceTime === undefined ? now + getEventOffsetMs(targetTime, currentTime) : performance.timeOrigin + performanceTime;
-};
 
 Pattern.prototype.midi = function (output) {
   return this.onTrigger((hap, currentTime, cps, targetTime) => {

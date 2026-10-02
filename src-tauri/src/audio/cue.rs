@@ -298,7 +298,7 @@ impl CueState {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
   use super::*;
 
   // An ALSA config that adds a device discarding all audio (cpal doesn't list ALSA's own "null"),

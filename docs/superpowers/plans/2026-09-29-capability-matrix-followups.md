@@ -102,8 +102,8 @@ Full three-tier run, all cells re-measured this date after the final-review fixe
   sudo dnf install ./surge-xt-x86_64-1.3.4.rpm
   ```
   This installs the plugin to `/usr/lib64/clap/Surge XT.clap`, which is one of the paths PLUG-1 already searches.
-  - **Ran 2026-10-02 (desktop: pass).** Surge XT 1.3.4's CLAP was extracted from the official RPM into `~/.clap/Surge XT.clap` (a per-user CLAP path the probe searches; no system install). The probe's Rust host loaded it, delivered the 8 events of `note("c4 e4 g4 c5")`, and rendered audio (rms 0.084, peak 0.45). This proves CLAP hosting from Rust with Strudel's events; the desktop app does not yet route plugin audio into its live output.
-- **PLUG-1 (cli: not-run, opt):** no probe yet.
+  - **Live in the app since 2026-10-02 (desktop: pass).** `.clap('Surge XT')` sends a pattern's notes to the desktop app's native engine (`src-tauri/src/audio/plugins.rs`): each plugin is loaded and activated on its own host thread (CLAP's main thread), one cpal stream renders all of them, and notes arrive with absolute times (as MIDI does) that the audio callback turns into sample offsets. The probe plays `note("c4 e4 g4 c5").clap('Surge XT')` in the REPL on the silent test device: 13 notes, 0 late, rms 0.10. (Surge XT's CLAP was extracted from the official 1.3.4 RPM into `~/.clap`; no system install.)
+- **PLUG-1 (cli: pass, opt, 2026-10-02):** the earlier offline probe (a standalone clack-host renders the pattern's note events through Surge XT, no app) now covers the CLI cell.
 
 ### Language front end (LANG)
 - **LANG-1 (cli, browser: fail):** 1 of 2 exact. All columns are 0-based (acorn's convention; V8's 1-based stack columns are converted). The syntax-error case reports the exact line and column (3:12, from `err.loc`). The unknown-function case does not: it reports 3:77 (from the stack trace of the transpiled code) instead of the user's source column 3:3, because the error is thrown from generated code and located by stack-frame heuristics rather than a source map back to the original pattern text.

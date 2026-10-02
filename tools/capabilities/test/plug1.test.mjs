@@ -2,7 +2,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { loadScope } from '../lib/scope.mjs';
 import { PLUGIN_PATTERN, pluginPattern } from '../lib/patterns.mjs';
-import { patternToNoteEvents } from '../probes/desktop/PLUG-1.mjs';
+import { patternToNoteEvents } from '../probes/cli/PLUG-1.mjs';
 
 describe('PLUG-1 pattern events', () => {
   beforeAll(() => loadScope());

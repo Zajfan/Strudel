@@ -1,11 +1,13 @@
 // Native audio for the desktop app: what the webview (WebKitGTK) can't do itself. A stand-in until
 // the VersaTone engine is ready (docs/superpowers/plans/2026-10-02-native-desktop-audio.md).
 pub mod cue;
+pub mod plugins;
 
 use tauri::ipc::{ InvokeBody, Request, Response };
 use tauri::State;
 
 use cue::{ CueState, CueStats };
+use plugins::{ EngineStats, NoteFromJs, PluginEngine };
 
 #[tauri::command]
 pub fn cue_devices() -> Result<Vec<String>, String> {
@@ -42,4 +44,32 @@ pub fn cue_stats(state: State<'_, CueState>) -> CueStats {
 #[tauri::command]
 pub fn cue_capture(start: bool, state: State<'_, CueState>) -> Response {
   Response::new(state.capture(start))
+}
+
+// ------------------------------------------------------------------ plugins
+
+#[tauri::command]
+pub fn clap_plugins() -> Vec<String> {
+  plugins::plugin_names()
+}
+
+// device: None for the default output
+#[tauri::command]
+pub fn engine_start(device: Option<String>, engine: State<'_, PluginEngine>) -> Result<(), String> {
+  engine.start(device)
+}
+
+#[tauri::command]
+pub fn clap_play(plugin: String, notes: Vec<NoteFromJs>, engine: State<'_, PluginEngine>) -> Result<(), String> {
+  engine.play(&plugin, notes)
+}
+
+#[tauri::command]
+pub fn engine_stats(engine: State<'_, PluginEngine>) -> EngineStats {
+  engine.stats()
+}
+
+#[tauri::command]
+pub fn engine_capture(start: bool, engine: State<'_, PluginEngine>) -> Response {
+  Response::new(engine.capture(start))
 }

@@ -465,25 +465,25 @@
     "PLUG-1": {
       "status": "pass",
       "metrics": {
-        "exitCode": 0,
-        "seconds": 4,
-        "plugin": "~/.clap/Surge XT.clap",
-        "patternEvents": 8,
-        "pluginId": "org.surge-synth-team.surge-xt",
-        "pluginName": "Surge XT",
-        "frames": 72000,
-        "rms": 0.08421546102597782,
-        "peak": 0.45054304599761963,
-        "eventsDelivered": 8,
-        "headline": "Surge XT via clack-host"
+        "plugins": [
+          "Surge XT"
+        ],
+        "notes": 13,
+        "lateNotes": 0,
+        "expectedNotes": 12,
+        "rms": 0.1011386449877673,
+        "peak": 0.26691386103630066,
+        "capturedSamples": 882000,
+        "headline": "Surge XT live: 13 notes, 0 late, rms 0.101"
       },
       "notes": {
-        "pattern": "note(\"c4 e4 g4 c5\")"
+        "code": "setcps(1)\nnote(\"c4 e4 g4 c5\").clap('Surge XT')",
+        "engine": "native CLAP host in the desktop app, on the silent device strudel_null"
       },
       "run": {
-        "ranAt": "2026-10-02T11:47:15.477Z",
-        "commit": "dcf2c544",
-        "dirty": false,
+        "ranAt": "2026-10-02T17:58:05.808Z",
+        "commit": "ad5984f7",
+        "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
         "platform": "linux-x64",
@@ -496,23 +496,23 @@
     "SYNC-1": {
       "status": "pass",
       "metrics": {
-        "ticks": 1445,
-        "spanSeconds": 60.166622325000006,
-        "startDelaySeconds": 0.1276105320000006,
-        "longestGapMs": 42.07589200000075,
+        "ticks": 1446,
+        "spanSeconds": 60.206821233,
+        "startDelaySeconds": 0.1387002999999986,
+        "longestGapMs": 41.83819199999925,
         "measuredTicks": 1421,
         "expectedIntervalMs": 41.666666666666664,
-        "intervalMs": 41.666557606828604,
-        "maxJitterMs": 0.6598252953554038,
-        "rmsJitterMs": 0.21608908540555086,
-        "headline": "0.660 ms max jitter over 1421 ticks"
+        "intervalMs": 41.66613207966794,
+        "maxJitterMs": 0.8458984572389454,
+        "rmsJitterMs": 0.2662731724026876,
+        "headline": "0.846 ms max jitter over 1421 ticks"
       },
       "notes": {
         "route": "midicmd(\"clock*48\").midi('Midi Through Port-0') at 0.5 cps -> Rust midibridge -> ALSA 14:0 -> aseqdump"
       },
       "run": {
-        "ranAt": "2026-10-02T15:23:38.836Z",
-        "commit": "1a0722ba",
+        "ranAt": "2026-10-02T17:59:32.471Z",
+        "commit": "ad5984f7",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
@@ -616,8 +616,8 @@
       },
       "notes": {},
       "run": {
-        "ranAt": "2026-10-02T17:53:40.622Z",
-        "commit": "05be049f",
+        "ranAt": "2026-10-02T17:59:33.134Z",
+        "commit": "ad5984f7",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
