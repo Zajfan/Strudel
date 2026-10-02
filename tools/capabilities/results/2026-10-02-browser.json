@@ -62,27 +62,27 @@
         "triggers": 3,
         "drops": [
           {
-            "atSample": 18306,
-            "beforeRms": 0.10755693210736808,
-            "afterRms": 0.002275846238429148,
-            "dropDb": 33.4899097882184
+            "atSample": 22912,
+            "beforeRms": 0.10756439488101793,
+            "afterRms": 0.0022759870932965074,
+            "dropDb": 33.489974869042925
           },
           {
-            "atSample": 66306,
-            "beforeRms": 0.10755693210736808,
-            "afterRms": 0.002275846238429148,
-            "dropDb": 33.4899097882184
+            "atSample": 70912,
+            "beforeRms": 0.10756439488101793,
+            "afterRms": 0.0022759870932965074,
+            "dropDb": 33.489974869042925
           },
           {
-            "atSample": 114306,
-            "beforeRms": 0.10755693210736808,
-            "afterRms": 0.002275846238429148,
-            "dropDb": 33.4899097882184
+            "atSample": 118912,
+            "beforeRms": 0.10756439488101793,
+            "afterRms": 0.0022759870932965074,
+            "dropDb": 33.489974869042925
           }
         ],
-        "dropDb": 33.4899097882184,
-        "beforeRms": 0.10755693210736808,
-        "recordedSamples": 145920,
+        "dropDb": 33.489974869042925,
+        "beforeRms": 0.10756439488101793,
+        "recordedSamples": 151040,
         "sampleRate": 48000,
         "offline": {
           "orbits": [
@@ -110,13 +110,13 @@
         "offline": "renderPatternStems of mixPattern(): buses are orbits, the send is a delay on orbit 3, the sidechain is duckorbit from orbit 2 to orbit 1"
       },
       "run": {
-        "ranAt": "2026-10-02T21:12:24.317Z",
-        "commit": "c414ec1e",
+        "ranAt": "2026-10-02T21:16:12.158Z",
+        "commit": "94b09e7a",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
         "platform": "linux-x64",
-        "distBuiltAt": "2026-10-02T21:09:08.557Z",
+        "distBuiltAt": "2026-10-02T21:15:12.658Z",
         "thresholds": {
           "minDuckDb": 6
         }
@@ -222,13 +222,13 @@
         "ramp": "gain automated 0.1 -> 1 over one held note with auto(saw.range(0.1, 1)), offline render"
       },
       "run": {
-        "ranAt": "2026-10-02T11:41:02.408Z",
-        "commit": "54d20dc7",
+        "ranAt": "2026-10-02T21:16:12.877Z",
+        "commit": "94b09e7a",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
         "platform": "linux-x64",
-        "distBuiltAt": "2026-10-02T11:27:19.583Z",
+        "distBuiltAt": "2026-10-02T21:15:12.658Z",
         "thresholds": {
           "maxErrorMs": 1
         }
@@ -238,15 +238,15 @@
       "status": "pass",
       "metrics": {
         "events": 1115,
-        "rms": 0.1071041065033699,
+        "rms": 0.10673865428071937,
         "lengthSamples": 3072000,
         "expectedLength": 3072000,
         "secondLength": 3072000,
         "hashes": [
-          "4668e3c2",
-          "404f34e5"
+          "64295a49",
+          "e2323d8d"
         ],
-        "firstDifferenceLeft": 1,
+        "firstDifferenceLeft": 2,
         "channels": 2,
         "wav": {
           "format": 1,
@@ -257,7 +257,7 @@
           "frames": 3072000,
           "fileBytes": 12288044
         },
-        "maxDiffDbfs": -81.54744242963424,
+        "maxDiffDbfs": -81.53855344526926,
         "headline": "64 s WAV, repeatable within -81.5 dBFS"
       },
       "notes": {
@@ -265,13 +265,13 @@
         "scope": "left channel hashed; render has no tail"
       },
       "run": {
-        "ranAt": "2026-10-02T21:12:14.361Z",
-        "commit": "c414ec1e",
+        "ranAt": "2026-10-02T21:16:07.731Z",
+        "commit": "94b09e7a",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
         "platform": "linux-x64",
-        "distBuiltAt": "2026-10-02T21:09:08.557Z",
+        "distBuiltAt": "2026-10-02T21:15:12.658Z",
         "thresholds": {
           "minRms": 0.001,
           "maxDiffDbfs": -60
@@ -293,27 +293,27 @@
         ],
         "stemRms": {
           "1": 0.039059157460414114,
-          "2": 0.023485790957464437,
+          "2": 0.02348579095159365,
           "3": 0.027811885883111807,
           "4": 0.01560795278054175
         },
-        "residualDbfs": -154.5973974851091,
+        "residualDbfs": -153.38344067803686,
         "lengthSamples": 96000,
         "referenceLength": 96000,
-        "headline": "4 stems, residual -154.6 dBFS"
+        "headline": "4 stems, residual -153.4 dBFS"
       },
       "notes": {
         "reference": "renderPatternAudio stereo render of the same pattern",
         "scope": "left channels compared"
       },
       "run": {
-        "ranAt": "2026-10-02T21:12:20.643Z",
-        "commit": "c414ec1e",
+        "ranAt": "2026-10-02T21:16:08.505Z",
+        "commit": "94b09e7a",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
         "platform": "linux-x64",
-        "distBuiltAt": "2026-10-02T21:09:08.557Z",
+        "distBuiltAt": "2026-10-02T21:15:12.658Z",
         "thresholds": {
           "maxResidualDbfs": -60
         }

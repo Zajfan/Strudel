@@ -53,7 +53,12 @@ WebKitGTK (the desktop webview) cannot play to a second output device (no `setSi
   placed at their exact frame. Measured: plugin notes within 1.5 ms of superdough notes scheduled at
   the same times (Surge XT's own 16-frame blocks and attack). `.clap(name, { output: 'native' })`
   keeps the native output (lower latency, no Strudel effects).
-- Per-voice controls (filters, envelopes) don't apply to a plugin stream.
+- Done 2026-10-02: filters on a plugin's stream. An external channel has a low-, high- and band-pass
+  filter (each with a dry path, so a filter that is off is transparent), set by every hap from its
+  time on: lpf/hpf/bpf, their q, and their envelopes over the hap's duration (as superdough's voice
+  filters). One plugin is one stream, so each note sets the filter for the whole plugin, like a mono
+  synth's filter. The amplitude envelope and other per-voice effects stay the plugin's (its own
+  parameters, automatable with `.auto()`). Checked by desktop PLUG-1 (part 6, offline renders).
 - Done 2026-10-02: exports include plugins. Offline renders (WAV and stems) hand haps whose context
   names an offline renderer to it instead of superdough (`registerOfflineRenderer` in webaudio.mjs).
   The clap renderer loads an instance of each plugin of its own at the export's sample rate

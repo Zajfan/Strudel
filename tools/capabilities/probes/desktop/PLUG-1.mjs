@@ -12,6 +12,9 @@
 //    show something (not one flat colour), and closes it again.
 // 5. Exports: an offline stem render of a pattern with the plugin on orbit 2 and a sine on orbit 1.
 //    The plugin's stem must hold its notes, each within MAX_EXPORT_MS of its time, and only its stem.
+// 6. Filters on the plugin's stream, in offline renders: lpf(300) must make it much darker, hpf(3000)
+//    brighter, and a filter envelope (lpf(200).lpenv(6), short decay) bright at each note's start
+//    and dark after. Brightness: the rms of the first difference over the rms.
 // Without Surge XT in a CLAP folder this is not-run (see the follow-ups doc for installing it).
 
 import { execFileSync } from 'node:child_process';
@@ -240,6 +243,30 @@ export async function probe({ page, thresholds }) {
   });
   const exportMaxMs = Math.max(...exportOffsetsMs.map(Math.abs));
 
+  // 6. filters on the plugin's stream
+  const renderPlugin = async (builder) => (await renderStemsInPage(page, builder, { cps: 1, cycles: 1, sampleRate: 48000 }))?.stems?.get(1);
+  const brightness = (x, from = 0, to = x?.length ?? 0) => {
+    let d = 0;
+    for (let i = from + 1; i < to; i++) d += (x[i] - x[i - 1]) ** 2;
+    return Math.sqrt(d / Math.max(1, to - from - 1)) / Math.max(1e-9, rmsOf(x, from, to));
+  };
+  let filterMetrics;
+  try {
+    const plain = await renderPlugin(() => note("c4 ~ e4 ~").clap('Surge XT'));
+    const lpf = await renderPlugin(() => note("c4 ~ e4 ~").clap('Surge XT').lpf(300));
+    const hpf = await renderPlugin(() => note("c4 ~ e4 ~").clap('Surge XT').hpf(3000));
+    const env = await renderPlugin(() => note("c4 ~ e4 ~").clap('Surge XT').lpf(200).lpenv(6).lpattack(0.001).lpdecay(0.08).lpsustain(0));
+    const db = (a, b) => 20 * Math.log10(a / b);
+    filterMetrics = {
+      lpfDarkerDb: db(brightness(plain), brightness(lpf)),
+      hpfBrighterDb: db(brightness(hpf), brightness(plain)),
+      // the first note: its first 40 ms against 150-240 ms
+      envelopeDropDb: db(brightness(env, 0, 1920), brightness(env, 7200, 11520)),
+    };
+  } catch (err) {
+    filterMetrics = { error: String(err?.message ?? err) };
+  }
+
   // 3. on a native output
   const native = await page.evaluate(playNative, { code: NATIVE_CODE, seconds: 3, plugin: PLUGIN, unload: false }, { timeoutMs: 120000 });
   // automation on the native output: the engine applies the parameter changes (counted). (Their
@@ -267,6 +294,7 @@ export async function probe({ page, thresholds }) {
           // where only the plugin sounds (its second note; the sine has decayed)
           sineStemLeakRms: exported?.stems?.get(1) ? rmsOf(exported.stems.get(1), 26400, 33600) : null,
         },
+    filters: filterMetrics,
     native: native.error
       ? { error: native.error }
       : {
@@ -277,7 +305,7 @@ export async function probe({ page, thresholds }) {
           paramChanges: muted.stats?.paramChanges,
           loadedAfterUnload: muted.loadedAfterUnload,
         },
-    headline: `${PLUGIN} in the mixer: within ${maxOffsetMs.toFixed(1)} ms of the beat, room +${tailGainDb.toFixed(1)} dB, automation -${automationDropDb.toFixed(0)} dB, GUI ${guiWidth}x${guiHeight}, export ${exportOnsets.length} notes within ${exportMaxMs.toFixed(1)} ms; native: ${native.stats?.notes ?? 0} notes`,
+    headline: `${PLUGIN} in the mixer: within ${maxOffsetMs.toFixed(1)} ms of the beat, room +${tailGainDb.toFixed(1)} dB, automation -${automationDropDb.toFixed(0)} dB, GUI ${guiWidth}x${guiHeight}, export ${exportOnsets.length} notes within ${exportMaxMs.toFixed(1)} ms, lpf -${filterMetrics.lpfDarkerDb?.toFixed(0)} dB; native: ${native.stats?.notes ?? 0} notes`,
   };
   const fail = (error) => ({ status: 'fail', metrics, notes: { ...notes, error } });
   if (!(pluginOnsets.length >= SECONDS - 1)) return fail(`${pluginOnsets.length} plugin notes recorded on its channel`);
@@ -299,6 +327,10 @@ export async function probe({ page, thresholds }) {
   if (!(exportMaxMs <= MAX_EXPORT_MS)) return fail(`export: plugin notes off their times by up to ${exportMaxMs.toFixed(2)} ms`);
   if (!(metrics.export.sineStemRms >= thresholds.minRms)) return fail('export: the sine stem is silent');
   if (!(metrics.export.sineStemLeakRms < 1e-3)) return fail(`export: the plugin is in the sine's stem too (rms ${metrics.export.sineStemLeakRms})`);
+  if (filterMetrics.error) return fail(`filters: ${filterMetrics.error}`);
+  if (!(filterMetrics.lpfDarkerDb >= 12)) return fail(`lpf(300) made the plugin only ${filterMetrics.lpfDarkerDb.toFixed(1)} dB darker`);
+  if (!(filterMetrics.hpfBrighterDb >= 6)) return fail(`hpf(3000) made the plugin only ${filterMetrics.hpfBrighterDb.toFixed(1)} dB brighter`);
+  if (!(filterMetrics.envelopeDropDb >= 6)) return fail(`the filter envelope darkened the note by only ${filterMetrics.envelopeDropDb.toFixed(1)} dB`);
   if (native.error) return fail(`native output: ${native.error}`);
   if (!(native.stats.notes >= 11) || native.stats.lateNotes > 0) return fail(`native output: ${native.stats.notes} notes, ${native.stats.lateNotes} late`);
   if (!(native.rms >= thresholds.minRms)) return fail(`native output rms ${native.rms}`);

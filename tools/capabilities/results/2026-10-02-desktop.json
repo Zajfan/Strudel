@@ -468,15 +468,15 @@
         "pluginNotes": 4,
         "referenceNotes": 4,
         "syncOffsetsMs": [
-          1.18,
-          0,
-          0.63,
-          -0.07
+          0.48,
+          1.07,
+          0.11,
+          0.11
         ],
-        "maxSyncOffsetMs": 1.179138321995465,
-        "pluginRms": 0.04053204808172475,
-        "masterRms": 0.053690031526102695,
-        "reverbTailGainDb": 94.8839192200698,
+        "maxSyncOffsetMs": 1.0657596371882085,
+        "pluginRms": 0.040474290246292406,
+        "masterRms": 0.05151814721228374,
+        "reverbTailGainDb": 97.85229995450231,
         "automatableParams": 598,
         "gui": {
           "width": 1141,
@@ -484,7 +484,7 @@
           "colours": 5071,
           "closed": true
         },
-        "automationDropDb": 153.73049246734618,
+        "automationDropDb": 155.4231890017566,
         "export": {
           "orbits": [
             1,
@@ -492,25 +492,30 @@
           ],
           "pluginStemNotes": 6,
           "offsetsMs": [
-            3.4,
-            1.25,
-            1.58,
+            2.71,
+            1.04,
             0.96,
-            1.67,
-            1.58
+            0.33,
+            0.13,
+            0.81
           ],
           "sineStemRms": 0.031134120806411116,
           "sineStemLeakRms": 0
+        },
+        "filters": {
+          "lpfDarkerDb": 14.877657404903157,
+          "hpfBrighterDb": 10.42460831298154,
+          "envelopeDropDb": 10.29924755249584
         },
         "native": {
           "notes": 13,
           "lateNotes": 0,
           "device": "strudel_null",
-          "rms": 0.10065606255241805,
+          "rms": 0.10065397856891506,
           "paramChanges": 429,
           "loadedAfterUnload": []
         },
-        "headline": "Surge XT in the mixer: within 1.2 ms of the beat, room +94.9 dB, automation -154 dB, GUI 1141x711, export 6 notes within 3.4 ms; native: 13 notes"
+        "headline": "Surge XT in the mixer: within 1.1 ms of the beat, room +97.9 dB, automation -155 dB, GUI 1141x711, export 6 notes within 2.7 ms, lpf -15 dB; native: 13 notes"
       },
       "notes": {
         "plugin": "Surge XT",
@@ -518,8 +523,8 @@
         "native": "setcps(1)\nnote(\"c4 e4 g4 c5\").clap('Surge XT', { output: 'native' })"
       },
       "run": {
-        "ranAt": "2026-10-02T21:11:47.094Z",
-        "commit": "c414ec1e",
+        "ranAt": "2026-10-02T21:15:42.055Z",
+        "commit": "94b09e7a",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",

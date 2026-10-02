@@ -131,9 +131,9 @@ async function sendToMixer({ index, params }, value, time, duration) {
 }
 
 function playInMixer(plugin, hap, cps, targetTime) {
-  // the channel takes the orbit-level controls (gain, pan, orbit, delay, room, cue) from this time
-  getExternalChannel(`clap:${plugin}`).update(hap.value, targetTime, cps);
+  // the channel takes the hap's controls (gain, pan, orbit, delay, room, cue, filters) from this time
   const duration = hap.duration.valueOf() / cps;
+  getExternalChannel(`clap:${plugin}`).update(hap.value, targetTime, cps, duration);
   getStream(plugin)
     .ready.then((stream) => sendToMixer(stream, hap.value, targetTime, duration))
     .catch((err) => logger(`[clap] ${plugin}: ${err}`, 'error'));
@@ -164,7 +164,7 @@ registerOfflineRenderer('clap', {
       async trigger(hap, t, duration, cps) {
         const { clapPlugin: plugin } = hap.context;
         hap.ensureObjectValue();
-        getExternalChannel(`clap:${plugin}`).update(hap.value, t, cps);
+        getExternalChannel(`clap:${plugin}`).update(hap.value, t, cps, duration);
         await sendToMixer(await instance(plugin), hap.value, t, duration);
       },
       async render(from, to) {
@@ -228,7 +228,8 @@ function playNative(plugin, hap, currentTime, cps, targetTime) {
  * Plays the pattern's notes on a CLAP instrument plugin (desktop app only), e.g.
  *   note("c3 e3 g3 c4").clap('Surge XT').room(0.3)
  * By default the plugin plays through Strudel's mixer: orbit effects (room, delay, ducking), gain,
- * pan, stems and cue apply to it, and it is in time with everything else. Its parameters can be
+ * pan, filters (lpf, hpf, bpf and their envelopes: each note sets them for the whole plugin, like a
+ * mono synth's filter), stems and cue apply to it, and it is in time with everything else. Its parameters can be
  * automated with `auto`, by name (clapParams lists them), in their own value range:
  *   note("c2").clap('Surge XT').auto(sine.range(0, 1).slow(4), { c: 'Global Volume' }) `{ output: 'native' }`
  * plays it on the plugin output device instead (lower latency, no Strudel effects; `auto` works too).

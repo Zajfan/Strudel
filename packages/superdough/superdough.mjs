@@ -16,8 +16,10 @@ import {
   gainNode,
   getCompressor,
   getDistortion,
+  getADSRValues,
   getFrequencyFromValue,
   getLfo,
+  getParamADSR,
   getWorklet,
   releaseAudioNode,
   webAudioTimeout,
@@ -357,10 +359,19 @@ export function setSuperdoughAudioController(newController) {
 // External sources: continuous streams from outside superdough (e.g. CLAP plugins rendered by the
 // desktop backend) played through an orbit like superdough's own voices. A channel has an `input`
 // for the stream, then gain, pan and post-gain, and sends to its orbit's delay and reverb.
-// update(value, t, cps) applies a hap's orbit-level controls from time t: orbit and cue (routing), gain,
+// update(value, t, cps, duration) applies a hap's controls from time t: orbit and cue (routing), gain,
 // postgain, pan, delay/delaytime/delayfeedback and room/roomsize/roomfade/roomlp/roomdim; ducking
-// comes with the orbit. Per-voice controls (filters, envelopes) don't apply to a whole stream.
+// comes with the orbit. The filters (lpf, hpf, bpf with their q and envelopes: lpenv, lpattack, ...) are
+// the stream's: each hap sets them (or leaves them off) from its time on, like a mono synth's filter,
+// with the envelope over the hap's duration. Other per-voice controls (the amplitude envelope, shape,
+// vowel, ...) don't apply to a whole stream.
 const externalChannels = new Map();
+// a channel's filters, in order, and the controls that set them
+const externalFilters = [
+  { type: 'lowpass', frequency: 'cutoff', q: 'resonance', env: 'lp' },
+  { type: 'highpass', frequency: 'hcutoff', q: 'hresonance', env: 'hp' },
+  { type: 'bandpass', frequency: 'bandf', q: 'bandq', env: 'bp' },
+];
 export function getExternalChannel(key) {
   let channel = externalChannels.get(key);
   const ac = getAudioContext();
@@ -368,9 +379,21 @@ export function getExternalChannel(key) {
     return channel;
   }
   const input = new GainNode(ac, { channelCount: 2, channelCountMode: 'explicit' });
+  // each filter with a dry path beside it, so a filter that is off leaves the stream as it is
+  let filterInput = input;
+  const filters = externalFilters.map((control) => {
+    const filter = new BiquadFilterNode(ac, { type: control.type });
+    const wet = new GainNode(ac, { gain: 0 });
+    const dry = new GainNode(ac, { gain: 1 });
+    const out = new GainNode(ac);
+    filterInput.connect(filter).connect(wet).connect(out);
+    filterInput.connect(dry).connect(out);
+    filterInput = out;
+    return { control, filter, wet, dry };
+  });
   const panner = new StereoPannerNode(ac);
   const post = new GainNode(ac);
-  input.connect(panner).connect(post);
+  filterInput.connect(panner).connect(post);
   let orbitBus;
   let routeKey;
   let delaySend;
@@ -378,7 +401,7 @@ export function getExternalChannel(key) {
   channel = {
     ac,
     input,
-    update(value, t, cps = 0.5) {
+    update(value, t, cps = 0.5, duration = 0) {
       // the hap's value, else superdough's default, else `fallback` (not every control has a default)
       const v = (key, fallback) => {
         const x = Number(value[key] ?? getDefaultValue(key) ?? fallback);
@@ -416,9 +439,38 @@ export function getExternalChannel(key) {
         reverbSend ??= orbitBus.sendReverb(post, 0);
       }
       reverbSend?.gain.setValueAtTime(room, t);
+      for (const { control, filter, wet, dry } of filters) {
+        const frequency = Number(value[control.frequency]);
+        const on = Number.isFinite(frequency);
+        wet.gain.setValueAtTime(on ? 1 : 0, t);
+        dry.gain.setValueAtTime(on ? 0 : 1, t);
+        if (!on) continue;
+        filter.Q.setValueAtTime(nanFallback(value[control.q], 1, true), t);
+        // the previous hap's envelope ends here
+        filter.frequency.cancelScheduledValues(t);
+        const p = control.env;
+        const envelope = [value[`${p}attack`], value[`${p}decay`], value[`${p}sustain`], value[`${p}release`]];
+        if ([...envelope, value[`${p}env`]].every((x) => x === undefined)) {
+          filter.frequency.setValueAtTime(clamp(frequency, 0, 20000), t);
+          continue;
+        }
+        // as superdough's voice filters (createFilter)
+        const [attack, decay, sustain, release] = getADSRValues(envelope, 'exponential', [0.005, 0.14, 0, 0.1]);
+        const env = nanFallback(value[`${p}env`], 1, true);
+        const offset = Math.abs(env) * nanFallback(value.fanchor, 0, true);
+        let min = clamp(2 ** -offset * frequency, 0, 20000);
+        let max = clamp(2 ** (Math.abs(env) - offset) * frequency, 0, 20000);
+        if (env < 0) [min, max] = [max, min];
+        getParamADSR(filter.frequency, attack, decay, sustain, release, min, max, t, t + duration, 'exponential');
+      }
     },
     disconnect() {
       input.disconnect();
+      for (const { filter, wet, dry } of filters) {
+        filter.disconnect();
+        wet.disconnect();
+        dry.disconnect();
+      }
       panner.disconnect();
       post.disconnect();
       delaySend?.disconnect();
