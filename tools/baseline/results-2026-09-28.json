@@ -1,0 +1,41 @@
+{
+  "audio": {
+    "ready": true,
+    "scheduler": "np",
+    "contexts": [
+      {
+        "state": "running",
+        "sampleRate": 48000,
+        "time": 5.034666666666666
+      }
+    ],
+    "audioStarts": 11,
+    "lateStarts": 0,
+    "minLeadMs": 110,
+    "maxRms": 0.012007954189956357,
+    "nonzeroWindows": 50,
+    "error": "",
+    "errors": []
+  },
+  "stress": {
+    "schedulerUsesWorker": false,
+    "eventCount": 327,
+    "late": 0,
+    "minLeadMs": 109.96666666666499,
+    "medianLeadMs": 267.46666666667096,
+    "maxGridDeviationMs": 0,
+    "evaluateMs": 7.7200000286102295,
+    "eventsAfterEdit": 162,
+    "newPitchObserved": true,
+    "noStartsAfterStop": true,
+    "errors": [],
+    "replError": ""
+  },
+  "sample": {
+    "sampleStarts": 9,
+    "maxRms": 0.01954416508121635,
+    "nonzeroWindows": 28,
+    "errors": [],
+    "replError": ""
+  }
+}
