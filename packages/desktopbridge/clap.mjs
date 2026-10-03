@@ -293,9 +293,13 @@ function playNative(name, plugin, hap, currentTime, cps, targetTime) {
  * and clapGui, clapState, clapParams and unloadClap then take the id.
  * @param {string} [options.state] a state from clapState, loaded into the plugin before its notes
  * @param {string} [options.id] the instance's name (default: the plugin's name)
+ * @param {string} [options.format] 'clap' or 'vst3': which plugin a name means when both are
+ * installed (default: CLAP, else VST3). VST3 plugins play in the mixer (not on the native output)
+ * and their parameters take 0-1.
  */
-Pattern.prototype.clap = function (plugin, { output = 'mixer', gui = false, state, id } = {}) {
-  const name = id ?? plugin;
+Pattern.prototype.clap = function (pluginName, { output = 'mixer', gui = false, state, id, format } = {}) {
+  const name = id ?? pluginName;
+  const plugin = format ? `${format}:${pluginName}` : pluginName;
   const pattern = this.withHap((hap) =>
     hap.setContext({ ...hap.context, offlineRenderer: 'clap', clapPlugin: plugin, clapName: name, clapState: state }),
   );

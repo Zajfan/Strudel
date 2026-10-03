@@ -28,6 +28,7 @@ clack-extensions = { version = "=0.2.0", features = ["clack-host", "audio-ports"
 x11rb = "0.13"
 libc = "0.2"
 base64 = "0.22"
+vst3-host = { version = "0.9.0", default-features = false }
 flate2 = "1"
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-dialog = "2"

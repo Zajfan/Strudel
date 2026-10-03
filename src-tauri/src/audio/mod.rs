@@ -3,6 +3,7 @@
 pub mod cue;
 pub mod mixer;
 pub mod plugins;
+pub mod vst3;
 pub mod x11window;
 
 use tauri::ipc::{ InvokeBody, Request, Response };

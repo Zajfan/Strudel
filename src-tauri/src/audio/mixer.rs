@@ -12,7 +12,61 @@ use std::time::{ Duration, Instant };
 
 use serde::Deserialize;
 
-use super::plugins::{ gui_title, host_gui, load_plugin_kind, load_state, save_state, wait_unloaded, Loaded, NewSlot, NoteEvent, ParamDesc, Slot, BLOCK, CHANNELS };
+use super::plugins::{
+  decode_state, encode_state, find_plugin, gui_title, host_gui, load_plugin_kind, load_state, save_state, wait_unloaded, Loaded, NewSlot,
+  NoteEvent, ParamDesc, Slot, BLOCK, CHANNELS,
+};
+use super::vst3::{ self, find_vst3, Vst3Slot };
+
+// a plugin in the render thread: CLAP (rendered here) or VST3 (rendered on the VST3 thread)
+enum AnySlot {
+  Clap(Slot),
+  Vst3(Vst3Slot),
+}
+
+impl AnySlot {
+  fn render(&mut self, out: &mut [f32], n: usize, notes: &[(u32, NoteEvent)], params: &[(u32, u32, f64)]) {
+    match self {
+      AnySlot::Clap(slot) => slot.render_with_params(out, n, notes, params),
+      AnySlot::Vst3(slot) => slot.render_with_notes(out, n, notes.iter().map(|(o, e)| (*o, e.key, e.velocity, e.on)).collect(), params),
+    }
+  }
+  fn process(&mut self, input: &[f32], out: &mut [f32], n: usize, params: &[(u32, u32, f64)]) {
+    match self {
+      AnySlot::Clap(slot) => slot.process_with_params(input, out, n, params),
+      AnySlot::Vst3(slot) => slot.process_with_params(input, out, n, params),
+    }
+  }
+  fn retire(self) {
+    match self {
+      AnySlot::Clap(slot) => slot.retire(),
+      AnySlot::Vst3(slot) => vst3::unload(slot.id),
+    }
+  }
+}
+
+// The format a plugin name picks: "clap:<name>" or "vst3:<name>", or else CLAP if there is one by that
+// name, then VST3.
+enum Found {
+  Clap,
+  Vst3(std::path::PathBuf),
+}
+
+fn find(plugin: &str) -> Result<(Found, &str), String> {
+  if let Some(name) = plugin.strip_prefix("vst3:") {
+    return find_vst3(name).map(|p| (Found::Vst3(p), name)).ok_or_else(|| format!("no VST3 plugin \"{}\" (looked in VST3_PATH, ~/.vst3, /usr/lib/vst3, /usr/lib64/vst3, /usr/local/lib/vst3)", name));
+  }
+  if let Some(name) = plugin.strip_prefix("clap:") {
+    return Ok((Found::Clap, name));
+  }
+  if find_plugin(plugin).is_ok() {
+    return Ok((Found::Clap, plugin));
+  }
+  match find_vst3(plugin) {
+    Some(path) => Ok((Found::Vst3(path), plugin)),
+    None => Ok((Found::Clap, plugin)),
+  }
+}
 
 #[derive(Deserialize)]
 pub struct MixNote {
@@ -49,6 +103,7 @@ struct FrameNote {
 
 enum Command {
   Add(NewSlot),
+  AddVst3(usize, Vst3Slot),
   Notes(usize, Vec<FrameNote>),
   Params(usize, Vec<FrameParam>),
   Render { plugin: usize, start: i64, frames: usize, reply: Sender<Vec<u8>> },
@@ -63,6 +118,8 @@ struct Inner {
   plugins: HashMap<String, usize>,
   // which plugin each index is, and which are effects
   names: HashMap<usize, String>,
+  // the VST3 plugins' ids on the VST3 thread (the others are CLAP, see host_ids)
+  vst3_ids: HashMap<usize, u64>,
   effects: std::collections::HashSet<usize>,
   // per plugin index: the sample rate it was loaded for (the page's, or an export's)
   rates: HashMap<usize, f64>,
@@ -78,10 +135,12 @@ pub struct MixerEngine {
   inner: Mutex<Option<Inner>>,
 }
 
+const VST3_STATE_PREFIX: &str = "vst3:";
+
 // The render thread: plugins with their pending notes, rendering on request.
 fn render_thread(commands: Receiver<Command>) {
   // per plugin: the slot, its pending notes and its pending parameter changes
-  let mut slots: HashMap<usize, (Slot, Vec<FrameNote>, Vec<FrameParam>)> = HashMap::new();
+  let mut slots: HashMap<usize, (AnySlot, Vec<FrameNote>, Vec<FrameParam>)> = HashMap::new();
   let mut block_notes: Vec<(u32, NoteEvent)> = Vec::with_capacity(256);
   let mut block_params: Vec<(u32, u32, f64)> = Vec::with_capacity(256);
   while let Ok(command) = commands.recv() {
@@ -89,8 +148,11 @@ fn render_thread(commands: Receiver<Command>) {
       Command::Add(new) => {
         let index = new.index;
         if let Ok(slot) = Slot::new(new) {
-          slots.insert(index, (slot, Vec::new(), Vec::new()));
+          slots.insert(index, (AnySlot::Clap(slot), Vec::new(), Vec::new()));
         }
+      }
+      Command::AddVst3(index, slot) => {
+        slots.insert(index, (AnySlot::Vst3(slot), Vec::new(), Vec::new()));
       }
       Command::Notes(plugin, notes) => {
         if let Some((_, pending, _)) = slots.get_mut(&plugin) {
@@ -131,7 +193,7 @@ fn render_thread(commands: Receiver<Command>) {
               false
             });
             block_params.sort_by_key(|(o, _, _)| *o);
-            slot.render_with_params(&mut out[done * CHANNELS..(done + n) * CHANNELS], n, &block_notes, &block_params);
+            slot.render(&mut out[done * CHANNELS..(done + n) * CHANNELS], n, &block_notes, &block_params);
             done += n;
           }
         }
@@ -160,7 +222,7 @@ fn render_thread(commands: Receiver<Command>) {
             });
             block_params.sort_by_key(|(o, _, _)| *o);
             let range = done * CHANNELS..(done + n) * CHANNELS;
-            slot.process_with_params(&signal[range.clone()], &mut out[range], n, &block_params);
+            slot.process(&signal[range.clone()], &mut out[range], n, &block_params);
             done += n;
           }
           signal = out;
@@ -257,11 +319,21 @@ impl MixerEngine {
 
   // A plugin's state as text (see plugins::save_state), and loading one.
   pub fn state(&self, plugin: usize) -> Result<String, String> {
+    if let Some(id) = self.vst3_id(plugin) {
+      return encode_state(VST3_STATE_PREFIX, &vst3::save_state(id)?);
+    }
     save_state(self.host_id(plugin)?)
   }
 
   pub fn set_state(&self, plugin: usize, state: &str) -> Result<(), String> {
+    if let Some(id) = self.vst3_id(plugin) {
+      return vst3::load_state(id, decode_state(VST3_STATE_PREFIX, state)?);
+    }
     load_state(self.host_id(plugin)?, state)
+  }
+
+  fn vst3_id(&self, plugin: usize) -> Option<u64> {
+    self.inner.lock().unwrap().as_ref().and_then(|inner| inner.vst3_ids.get(&plugin).copied())
   }
 
   fn host_id(&self, plugin: usize) -> Result<u64, String> {
@@ -278,6 +350,7 @@ impl MixerEngine {
         commands,
         plugins: HashMap::new(),
         names: HashMap::new(),
+        vst3_ids: HashMap::new(),
         effects: std::collections::HashSet::new(),
         rates: HashMap::new(),
         params: HashMap::new(),
@@ -288,7 +361,20 @@ impl MixerEngine {
     });
     let index = inner.next_index;
     inner.next_index += 1;
-    let Loaded { slot, unloaded, id } = load_plugin_kind(plugin, index, sample_rate, effect)?;
+    let (found, name) = find(plugin)?;
+    if let Found::Vst3(path) = found {
+      let (slot, params) = vst3::load(path, sample_rate, effect)?;
+      inner.vst3_ids.insert(index, slot.id);
+      inner.rates.insert(index, sample_rate);
+      inner.names.insert(index, plugin.to_string());
+      if effect {
+        inner.effects.insert(index);
+      }
+      inner.params.insert(index, params);
+      inner.commands.send(Command::AddVst3(index, slot)).map_err(|e| e.to_string())?;
+      return Ok(index);
+    }
+    let Loaded { slot, unloaded, id } = load_plugin_kind(name, index, sample_rate, effect)?;
     inner.host_ids.insert(index, id);
     inner.unloaded.insert(index, unloaded);
     inner.rates.insert(index, sample_rate);
@@ -331,11 +417,20 @@ impl MixerEngine {
       let Some(index) = inner.plugins.get(plugin) else {
         return Ok(false);
       };
-      let id = *inner.host_ids.get(index).ok_or("no id for this plugin")?;
-      (id, inner.names.get(index).cloned().unwrap_or_default())
+      let name = inner.names.get(index).cloned().unwrap_or_default();
+      if let Some(&vst3_id) = inner.vst3_ids.get(index) {
+        (None, Some(vst3_id), name)
+      } else {
+        (Some(*inner.host_ids.get(index).ok_or("no id for this plugin")?), None, name)
+      }
     };
-    let (id, name) = id;
-    host_gui(id, &gui_title(plugin, &name), show)?;
+    let (clap_id, vst3_id, name) = id;
+    let title = gui_title(plugin, name.strip_prefix("vst3:").or(name.strip_prefix("clap:")).unwrap_or(&name));
+    match (clap_id, vst3_id) {
+      (_, Some(id)) => vst3::gui(id, &title, show)?,
+      (Some(id), _) => host_gui(id, &title, show)?,
+      _ => {}
+    }
     Ok(true)
   }
 
@@ -417,6 +512,7 @@ impl MixerEngine {
       inner.params.remove(&index);
       inner.names.remove(&index);
       inner.effects.remove(&index);
+      inner.vst3_ids.remove(&index);
       inner.host_ids.remove(&index);
       inner.commands.send(Command::Remove(index)).map_err(|e| e.to_string())?;
       inner.unloaded.remove(&index)
@@ -640,6 +736,54 @@ mod tests {
     // an instrument isn't an effect
     let synth = mixer.load_as("synth", "Surge XT", sr).unwrap();
     assert!(mixer.process(vec![synth], 0, vec![0.0; 1024]).is_err());
+    mixer.reset();
+  }
+
+  #[test]
+  fn hosts_vst3_instruments_and_effects() {
+    if vst3::find_vst3("Surge XT").is_none() || vst3::find_vst3("Surge XT Effects").is_none() {
+      println!("Surge XT VST3s missing, skipping");
+      return;
+    }
+    let sr = 48000.0;
+    let mixer = MixerEngine::default();
+    let synth = mixer.load_as("vsynth", "vst3:Surge XT", sr).unwrap();
+    mixer.notes(synth, vec![MixNote { time: 0.1, duration: 0.2, key: 60, velocity: 0.8 }]).unwrap();
+    let mut left = Vec::new();
+    // in the page's chunk size, and a last one that isn't a whole block
+    for (start, frames) in [(0usize, 1024usize), (1024, 1024), (2048, 1024), (3072, 1024), (4096, 1024), (5120, 4280)] {
+      let bytes = mixer.render(synth, start as i64, frames).unwrap();
+      left.extend(bytes.chunks_exact(8).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])));
+    }
+    let first = left.iter().position(|s| s.abs() > 1e-4).expect("no sound from the VST3");
+    println!("VST3 first sound at {} (note at 4800)", first);
+    assert!((first as i64 - 4800).abs() <= 96, "first sound at {}", first);
+    // a chain of a VST3 effect and a CLAP one
+    let names = super::super::plugins::plugin_names();
+    let mut chain = vec![mixer.load_effect_as("vfx", "vst3:Surge XT Effects", sr).unwrap()];
+    if names.iter().any(|n| n == "Surge XT Effects") && super::super::plugins::find_plugin("Surge XT Effects").is_ok() {
+      chain.push(mixer.load_effect_as("cfx", "clap:Surge XT Effects", sr).unwrap());
+    }
+    let mut input = vec![0.0f32; 24000 * CHANNELS];
+    for i in 0..4800 {
+      let x = (i as f32 * 440.0 * std::f32::consts::TAU / 48000.0).sin() * 0.5;
+      input[i * 2] = x;
+      input[i * 2 + 1] = x;
+    }
+    let mut out = Vec::new();
+    for chunk in 0..(24000 / 512) {
+      let part = input[chunk * 512 * CHANNELS..(chunk + 1) * 512 * CHANNELS].to_vec();
+      let bytes = mixer.process(chain.clone(), (chunk * 512) as i64, part).unwrap();
+      out.extend(bytes.chunks_exact(8).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])));
+    }
+    let rms = |from: usize, to: usize| (out[from..to].iter().map(|s| s * s).sum::<f32>() / (to - from) as f32).sqrt();
+    println!("chain of {}: burst {} tail {}", chain.len(), rms(0, 4800), rms(9600, 20000));
+    assert!(rms(0, 4800) > 0.01 && rms(9600, 20000) > 0.01, "the chain didn't process");
+    // state: text with its own prefix, loaded back
+    let state = mixer.state(chain[0]).unwrap();
+    assert!(state.starts_with("vst3:"));
+    mixer.set_state(chain[0], &state).unwrap();
+    assert!(mixer.set_state(chain[0], "clap1:abc").is_err());
     mixer.reset();
   }
 }

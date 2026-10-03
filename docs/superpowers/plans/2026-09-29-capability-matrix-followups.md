@@ -148,3 +148,13 @@ or "the native cue output played no cue on the device". Every run, passing or no
 The likely cause is the test device: strudel_null has no clock, so cpal's callback runs as fast as
 it can, the cue's jitter buffer runs dry, and what the capture holds depends on timing. A clocked
 silent device (or capturing on the webview's clock) would make the probe measure the cue itself.
+
+## PLUG-2 prerequisites (2026-10-03)
+
+PLUG-2 (desktop) uses Surge XT Effects (CLAP) and the VST3 builds of Surge XT and Surge XT Effects,
+all from the same official 1.3.4 RPM as PLUG-1's Surge XT, extracted into the user folders instead
+of installed:
+
+    rpm2cpio surge-xt-x86_64-1.3.4.rpm | cpio -idm './usr/lib64/clap/*' './usr/lib64/vst3/*'
+    cp 'usr/lib64/clap/Surge XT Effects.clap' ~/.clap/
+    cp -r usr/lib64/vst3/*.vst3 ~/.vst3/

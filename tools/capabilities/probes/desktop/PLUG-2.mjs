@@ -10,15 +10,24 @@
 //    without clapfx/masterfx removes the inserts (latency 0).
 // 3. Effects in exports: the same pattern (and a Surge XT instrument through the effect) as stems:
 //    orbit 2's stem has the tail, orbit 3's not.
-// Still to come (the cell fails until it is built and checked): VST3 plugins.
+// 4. VST3 (Surge XT's VST3 build, by { format: 'vst3' }): live in the mixer, its notes within
+//    MAX_VST3_MS of a reference superdough note; an export with a VST3 effect on an orbit has the
+//    effect's tail in that orbit's stem; its state is text that starts with "vst3:"; its editor
+//    opens in a window that shows something, and closes.
 // Without Surge XT in a CLAP folder this is not-run (see the follow-ups doc for installing it).
 
+import { execFileSync } from 'node:child_process';
 import { renderStemsInPage } from '../../lib/browser/page-render.mjs';
 
 export const usesPage = true;
 
 const PLUGIN = 'Surge XT';
-const PENDING = ['VST3 plugins'];
+const PENDING = [];
+// Surge XT's notes start up to ~2 ms late at 48 kHz (its 16-frame blocks and attack), as in PLUG-1
+const MAX_VST3_MS = 3;
+const VST3_CODE =
+  `setcps(1)\n$: note("c4 ~ ~ ~").clap('${PLUGIN}', { format: 'vst3', id: 'v3' }).orbit(2)\n` +
+  `$: note("c6 ~ ~ ~").s("sine").gain(0.3).release(0.05).orbit(3)`;
 const EFFECT = 'Surge XT Effects';
 const MAX_SYNC_MS = 2;
 const FX_CODE =
@@ -235,14 +244,70 @@ export async function probe({ page, thresholds }) {
     exported = { error: String(err?.message ?? err) };
   }
 
+  // 4. VST3
+  let vst3;
+  try {
+    const out = await page.evaluate(recordTaps, { code: VST3_CODE, seconds: 4, taps: ['orbit:2', 'orbit:3'] }, { timeoutMs: 120000 });
+    if (out.error) throw new Error(out.error);
+    const [synth, reference] = out.recorded.map(decode);
+    const sr = out.sampleRate;
+    const gap = Math.round(0.5 * sr);
+    const synthOnsets = onsets(synth, 0.05 * peak(synth), gap);
+    const refOnsets = onsets(reference, 0.05 * peak(reference), gap);
+    const nearest = (xs, at) => xs.reduce((best, x) => (Math.abs(x - at) < Math.abs(best - at) ? x : best), Infinity);
+    const syncMs = refOnsets.map((r) => ((nearest(synthOnsets, r) - r) / sr) * 1000).filter((d) => Math.abs(d) < 100);
+    const state = await page.evaluate(() => clapState('v3'));
+    const title = 'v3: Surge XT - Strudel';
+    const windows = () => execFileSync('xwininfo', ['-display', page.display, '-root', '-tree'], { encoding: 'utf8' });
+    const guiOpen = await page.evaluate(async () => {
+      try {
+        await clapGui('v3');
+        await new Promise((r) => setTimeout(r, 3000));
+        return {};
+      } catch (err) {
+        return { error: String(err) };
+      }
+    });
+    const guiLine = guiOpen.error ? undefined : windows().split('\n').find((l) => l.includes(`"${title}"`));
+    const guiId = guiLine?.trim().split(' ')[0];
+    const [width, height] = (guiLine?.match(/(\d+)x(\d+)\+/) ?? []).slice(1).map(Number);
+    const colours = guiId
+      ? Number(execFileSync('convert', ['-', '-format', '%k', 'info:'], { input: execFileSync('import', ['-display', page.display, '-window', guiId, 'png:-']) }).toString())
+      : 0;
+    await page.evaluate(() => clapGui('v3', false));
+    await new Promise((r) => setTimeout(r, 500));
+    const guiClosed = !windows().includes(`"${title}"`);
+    await page.evaluate(() => unloadClap('v3'));
+    const rendered = await renderStemsInPage(
+      page,
+      () =>
+        stack(
+          note("c5 ~ ~ ~").s('sine').decay(0.05).sustain(0).orbit(2).clapfx('Surge XT Effects', { format: 'vst3' }),
+          note("g5 ~ ~ ~").s('sine').decay(0.05).sustain(0).orbit(3),
+        ),
+      { cps: 1, cycles: 2, sampleRate: 48000 },
+    );
+    vst3 = {
+      notes: synthOnsets.length,
+      syncMs: syncMs.map((d) => +d.toFixed(2)),
+      statePrefix: state.slice(0, 5),
+      stateChars: state.length,
+      gui: { error: guiOpen.error, width, height, colours, closed: guiClosed },
+      exportTail: { fx: rmsRange(rendered.stems.get(2), 48000 * 1.5, 48000 * 1.9), dry: rmsRange(rendered.stems.get(3), 48000 * 0.3, 48000 * 0.9) },
+    };
+  } catch (err) {
+    vst3 = { error: String(err?.message ?? err) };
+  }
+
   const metrics = {
     instances,
+    vst3,
     effects,
     export: exported,
     pending: PENDING,
     headline: instances.error
       ? `instances: ${instances.error}`
-      : `2 instances; effects ${effects.error ? 'error' : `within ${Math.max(...(effects.syncMs ?? [NaN]).map(Math.abs)).toFixed(1)} ms after a ${effects.insertLatencyMs?.toFixed(0)} ms insert`}; to do: ${PENDING.join(', ') || 'nothing'}`,
+      : `2 instances; effects ${effects.error ? 'error' : `within ${Math.max(...(effects.syncMs ?? [NaN]).map(Math.abs)).toFixed(1)} ms after a ${effects.insertLatencyMs?.toFixed(0)} ms insert`}; VST3 ${vst3.error ? 'error' : `within ${Math.max(...vst3.syncMs.map(Math.abs)).toFixed(1)} ms, GUI ${vst3.gui.width}x${vst3.gui.height}`}${PENDING.length ? `; to do: ${PENDING.join(', ')}` : ''}`,
   };
   const fail = (error) => ({ status: 'fail', metrics, notes: { ...notes, error } });
   if (instances.error) return fail(`instances: ${instances.error}`);
@@ -263,6 +328,14 @@ export async function probe({ page, thresholds }) {
   if (effects.latencyAfterRemoval.orbit2 !== 0 || effects.latencyAfterRemoval.master !== 0) return fail('effects: code without clapfx/masterfx left an insert in place');
   if (exported.error) return fail(`effects in exports: ${exported.error}`);
   if (!(exported.tail.fx > 10 * exported.tail.dry && exported.tail.fx >= thresholds.minRms)) return fail(`effects in exports: no tail in orbit 2's stem (${exported.tail.fx} vs ${exported.tail.dry})`);
+  if (vst3.error) return fail(`VST3: ${vst3.error}`);
+  if (!(vst3.notes >= 3 && vst3.syncMs.length >= 3)) return fail(`VST3: ${vst3.notes} notes, ${vst3.syncMs.length} matched the reference`);
+  if (!(Math.max(...vst3.syncMs.map(Math.abs)) <= MAX_VST3_MS)) return fail(`VST3: notes off the reference by up to ${Math.max(...vst3.syncMs.map(Math.abs)).toFixed(2)} ms`);
+  if (vst3.statePrefix !== 'vst3:') return fail(`VST3: the state starts with ${vst3.statePrefix}`);
+  if (vst3.gui.error) return fail(`VST3 GUI: ${vst3.gui.error}`);
+  if (!(vst3.gui.width > 100 && vst3.gui.height > 100 && vst3.gui.colours > 50)) return fail(`VST3 GUI: ${vst3.gui.width}x${vst3.gui.height}, ${vst3.gui.colours} colours`);
+  if (!vst3.gui.closed) return fail('VST3 GUI: still open after clapGui(name, false)');
+  if (!(vst3.exportTail.fx > 10 * vst3.exportTail.dry && vst3.exportTail.fx >= thresholds.minRms)) return fail(`VST3 effect in an export: no tail (${vst3.exportTail.fx} vs ${vst3.exportTail.dry})`);
   if (PENDING.length) return fail(`not built yet: ${PENDING.join(', ')}`);
   return { status: 'pass', metrics, notes };
 }

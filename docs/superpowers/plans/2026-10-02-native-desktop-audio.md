@@ -111,3 +111,13 @@ WebKitGTK (the desktop webview) cannot play to a second output device (no `setSi
   through its chain and the sum through the master's, in Rust with instances of their own.
   Measured (desktop PLUG-2): notes after an insert within 0.05 ms of an orbit without one, master
   exactly one insert latency (46.4 ms at 44.1 kHz) after the orbits, no late chunks.
+- Done 2026-10-03: VST3 plugins, as instruments and effects, in the mixer and in exports (not on
+  the native output yet: an error says so). Hosted with the vst3-host crate (MIT, on the vst3
+  bindings); its plugins can't move between threads, so one thread (`strudel-vst3`,
+  src-tauri/src/audio/vst3.rs) owns them all: it loads them, renders the blocks the mixer's render
+  thread hands it, saves and loads state, and runs their editors' run loops (X11 windows of ours).
+  Plugins are looked for in VST3_PATH, ~/.vst3, /usr/lib/vst3, /usr/lib64/vst3, /usr/local/lib/vst3.
+  A name means the CLAP if there is one, else the VST3; `{ format: 'vst3' }` (or "vst3:<name>")
+  picks the VST3. VST3 parameters are normalized (0-1) for `auto`; states start with "vst3:".
+  Checked by a Rust test and PLUG-2 (part 4): notes within 2 ms of a reference, editor drawn,
+  effect tail in an export. PLUG-2 now passes.

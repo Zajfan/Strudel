@@ -285,12 +285,14 @@ pub fn plugin_names() -> Vec<String> {
     .filter_map(|e| e.ok())
     .filter_map(|e| e.file_name().to_str().and_then(|n| n.strip_suffix(".clap")).map(String::from))
     .collect();
+  // and the VST3 plugins (a name that is both plays the CLAP; "vst3:<name>" picks the VST3)
+  names.extend(super::vst3::vst3_names());
   names.sort();
   names.dedup();
   names
 }
 
-fn find_plugin(name: &str) -> Result<PathBuf, String> {
+pub(crate) fn find_plugin(name: &str) -> Result<PathBuf, String> {
   clap_dirs()
     .iter()
     .map(|d| d.join(format!("{}.clap", name)))
@@ -648,25 +650,35 @@ pub(crate) fn host_gui(id: u64, title: &str, show: bool) -> Result<(), String> {
 // A plugin's state, as text for a pattern: "clap1:" and the state's bytes, deflated, in base64.
 const STATE_PREFIX: &str = "clap1:";
 
-pub(crate) fn save_state(id: u64) -> Result<String, String> {
+// A state as text: the prefix ("clap1:" or "vst3:"), then the bytes deflated, in base64.
+pub(crate) fn encode_state(prefix: &str, bytes: &[u8]) -> Result<String, String> {
   use base64::Engine;
   use std::io::Write;
-  let (reply, answer) = channel();
-  main_thread().send(MainCommand::State { id, load: None, reply }).map_err(|e| e.to_string())?;
-  let bytes = answer.recv_timeout(Duration::from_secs(10)).map_err(|e| e.to_string())??;
   let mut deflate = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
-  deflate.write_all(&bytes).map_err(|e| e.to_string())?;
+  deflate.write_all(bytes).map_err(|e| e.to_string())?;
   let deflated = deflate.finish().map_err(|e| e.to_string())?;
-  Ok(format!("{}{}", STATE_PREFIX, base64::engine::general_purpose::STANDARD.encode(deflated)))
+  Ok(format!("{}{}", prefix, base64::engine::general_purpose::STANDARD.encode(deflated)))
 }
 
-pub(crate) fn load_state(id: u64, state: &str) -> Result<(), String> {
+pub(crate) fn decode_state(prefix: &str, state: &str) -> Result<Vec<u8>, String> {
   use base64::Engine;
   use std::io::Read;
-  let encoded = state.trim().strip_prefix(STATE_PREFIX).ok_or("not a plugin state (it starts with \"clap1:\")")?;
+  let encoded = state.trim().strip_prefix(prefix).ok_or_else(|| format!("not a state for this plugin (that starts with \"{}\")", prefix))?;
   let deflated = base64::engine::general_purpose::STANDARD.decode(encoded).map_err(|e| format!("not a plugin state: {}", e))?;
   let mut bytes = Vec::new();
   flate2::read::ZlibDecoder::new(deflated.as_slice()).read_to_end(&mut bytes).map_err(|e| format!("not a plugin state: {}", e))?;
+  Ok(bytes)
+}
+
+pub(crate) fn save_state(id: u64) -> Result<String, String> {
+  let (reply, answer) = channel();
+  main_thread().send(MainCommand::State { id, load: None, reply }).map_err(|e| e.to_string())?;
+  let bytes = answer.recv_timeout(Duration::from_secs(10)).map_err(|e| e.to_string())??;
+  encode_state(STATE_PREFIX, &bytes)
+}
+
+pub(crate) fn load_state(id: u64, state: &str) -> Result<(), String> {
+  let bytes = decode_state(STATE_PREFIX, state)?;
   let (reply, answer) = channel();
   main_thread().send(MainCommand::State { id, load: Some(bytes), reply }).map_err(|e| e.to_string())?;
   answer.recv_timeout(Duration::from_secs(10)).map_err(|e| e.to_string())?.map(|_| ())
@@ -1159,6 +1171,10 @@ impl PluginEngine {
   // Loads a plugin as the instance `name` (once) and returns its index. An instance of another plugin
   // by that name is replaced.
   pub fn load_as(&self, name: &str, plugin: &str) -> Result<usize, String> {
+    if plugin.starts_with("vst3:") || (find_plugin(plugin).is_err() && super::vst3::find_vst3(plugin).is_some()) {
+      return Err(format!("\"{}\" is a VST3 plugin: those play in Strudel's mixer (the default output), not on the native output yet", plugin));
+    }
+    let plugin = plugin.strip_prefix("clap:").unwrap_or(plugin);
     if self.running.lock().unwrap().is_none() {
       self.start(None)?;
     }

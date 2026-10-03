@@ -99,7 +99,7 @@ const loadInsert = (audioContext) => {
 
 // An effect's instance name: its id, or else the plugin's name and where it is ("Surge XT Effects
 // (orbit 2)"), so the same plugin on two orbits is two instances.
-const instanceName = (effect, key) => effect.id ?? `${effect.plugin} (${key})`;
+const instanceName = (effect, key) => effect.id ?? `${effect.plugin.replace(/^(clap|vst3):/, '')} (${key})`;
 
 // per insert key ('orbit 2', 'master'): its stats, for fxStats()
 const stats = new Map();
@@ -208,7 +208,11 @@ setInsertProvider({ create: createInsert });
 // were played dry instead): { 'orbit 2': { frames, lateFrames } }
 export const fxStats = () => Object.fromEntries(stats);
 
-const effectOf = (plugin, { id, state } = {}) => ({ plugin, ...(id != null && { id }), ...(state != null && { state }) });
+const effectOf = (plugin, { id, state, format } = {}) => ({
+  plugin: format ? `${format}:${plugin}` : plugin,
+  ...(id != null && { id }),
+  ...(state != null && { state }),
+});
 
 // the effects .clapfx and masterfx name in the code being evaluated (see the eval hook below)
 let masterChain = [];
@@ -227,6 +231,7 @@ let pendingMasterChain = null;
  * @param {Object} [options]
  * @param {string} [options.id] the instance's name
  * @param {string} [options.state] a state from clapState, loaded before it runs
+ * @param {string} [options.format] 'clap' or 'vst3', as for clap
  */
 Pattern.prototype.clapfx = function (plugin, options) {
   const effect = effectOf(plugin, options);
