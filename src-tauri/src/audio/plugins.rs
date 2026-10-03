@@ -24,6 +24,7 @@ use clack_extensions::note_ports::{ NoteDialect, NotePortInfoBuffer, PluginNoteP
 use clack_extensions::params::{ ParamInfoBuffer, ParamInfoFlags, PluginParams };
 use clack_extensions::gui::{ GuiApiType, GuiConfiguration, GuiSize, HostGui, HostGuiImpl, PluginGui, Window as ClapWindow };
 use clack_extensions::posix_fd::{ FdFlags, HostPosixFd, HostPosixFdImpl, PluginPosixFd };
+use clack_extensions::state::PluginState;
 use clack_extensions::timer::{ HostTimer, HostTimerImpl, PluginTimer, TimerId };
 use std::cell::{ Cell, RefCell };
 use std::os::fd::RawFd;
@@ -53,6 +54,7 @@ pub(crate) struct Shared {
   gui: OnceLock<Option<PluginGui>>,
   timer: OnceLock<Option<PluginTimer>>,
   posix_fd: OnceLock<Option<PluginPosixFd>>,
+  state: OnceLock<Option<PluginState>>,
   // GUI requests from the plugin, handled by its host thread
   gui_closed: AtomicBool,
   gui_resize: Mutex<Option<(u32, u32)>>,
@@ -66,6 +68,7 @@ impl<'a> SharedHandler<'a> for Shared {
     let _ = self.gui.set(instance.get_extension());
     let _ = self.timer.set(instance.get_extension());
     let _ = self.posix_fd.set(instance.get_extension());
+    let _ = self.state.set(instance.get_extension());
   }
   fn request_restart(&self) {}
   fn request_process(&self) {}
@@ -349,6 +352,8 @@ fn close_gui(instance: &mut PluginInstance<Host>, open: OpenGui) {
 enum MainCommand {
   Load { path: PathBuf, index: usize, sample_rate: f64, reply: Sender<Result<Loaded, String>> },
   Gui { id: u64, title: String, show: bool, reply: Sender<Result<(), String>> },
+  // saves the plugin's state (load: None) or loads one, replying with the saved bytes (or none)
+  State { id: u64, load: Option<Vec<u8>>, reply: Sender<Result<Vec<u8>, String>> },
 }
 
 // what an engine gets for a loaded plugin
@@ -497,6 +502,25 @@ fn handle(command: MainCommand, plugins: &mut Vec<Hosted>, next_id: &mut u64) {
       };
       let _ = reply.send(result);
     }
+    MainCommand::State { id, load, reply } => {
+      let result = (|| {
+        let hosted = plugins.iter_mut().find(|p| p.id == id).ok_or("the plugin is not loaded")?;
+        let state = hosted.instance.access_shared_handler(|s| s.state.get().copied().flatten()).ok_or("this plugin has no state to save")?;
+        let mut handle = hosted.instance.plugin_handle();
+        match load {
+          Some(bytes) => {
+            state.load(&mut handle, &mut bytes.as_slice()).map_err(|e| format!("the plugin did not take the state: {:?}", e))?;
+            Ok(Vec::new())
+          }
+          None => {
+            let mut bytes = Vec::new();
+            state.save(&mut handle, &mut bytes).map_err(|e| format!("the plugin did not save its state: {:?}", e))?;
+            Ok(bytes)
+          }
+        }
+      })();
+      let _ = reply.send(result);
+    }
   }
 }
 
@@ -594,6 +618,33 @@ pub(crate) fn host_gui(id: u64, title: &str, show: bool) -> Result<(), String> {
     .send(MainCommand::Gui { id, title: title.to_string(), show, reply })
     .map_err(|e| e.to_string())?;
   answer.recv_timeout(Duration::from_secs(10)).map_err(|e| e.to_string())?
+}
+
+// A plugin's state, as text for a pattern: "clap1:" and the state's bytes, deflated, in base64.
+const STATE_PREFIX: &str = "clap1:";
+
+pub(crate) fn save_state(id: u64) -> Result<String, String> {
+  use base64::Engine;
+  use std::io::Write;
+  let (reply, answer) = channel();
+  main_thread().send(MainCommand::State { id, load: None, reply }).map_err(|e| e.to_string())?;
+  let bytes = answer.recv_timeout(Duration::from_secs(10)).map_err(|e| e.to_string())??;
+  let mut deflate = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
+  deflate.write_all(&bytes).map_err(|e| e.to_string())?;
+  let deflated = deflate.finish().map_err(|e| e.to_string())?;
+  Ok(format!("{}{}", STATE_PREFIX, base64::engine::general_purpose::STANDARD.encode(deflated)))
+}
+
+pub(crate) fn load_state(id: u64, state: &str) -> Result<(), String> {
+  use base64::Engine;
+  use std::io::Read;
+  let encoded = state.trim().strip_prefix(STATE_PREFIX).ok_or("not a plugin state (it starts with \"clap1:\")")?;
+  let deflated = base64::engine::general_purpose::STANDARD.decode(encoded).map_err(|e| format!("not a plugin state: {}", e))?;
+  let mut bytes = Vec::new();
+  flate2::read::ZlibDecoder::new(deflated.as_slice()).read_to_end(&mut bytes).map_err(|e| format!("not a plugin state: {}", e))?;
+  let (reply, answer) = channel();
+  main_thread().send(MainCommand::State { id, load: Some(bytes), reply }).map_err(|e| e.to_string())?;
+  answer.recv_timeout(Duration::from_secs(10)).map_err(|e| e.to_string())?.map(|_| ())
 }
 
 // Waits (up to 2 s) until an unloaded plugin is gone.
@@ -1002,6 +1053,13 @@ impl PluginEngine {
     Ok(())
   }
 
+  // a loaded plugin's id on the main thread
+  pub fn host_id(&self, plugin: &str) -> Option<u64> {
+    let guard = self.running.lock().unwrap();
+    let running = guard.as_ref()?;
+    running.host_ids.get(running.plugins.get(plugin)?).copied()
+  }
+
   // Shows or hides a loaded plugin's GUI; Ok(false) if it isn't loaded here.
   pub fn gui(&self, plugin: &str, show: bool) -> Result<bool, String> {
     let id = {
@@ -1020,11 +1078,16 @@ impl PluginEngine {
 
   // Moves the engine to another output device, reloading the plugins that were loaded.
   pub fn set_device(&self, device: Option<String>) -> Result<(), String> {
-    let plugins = self.loaded();
+    // the plugins come back as they were (patch, GUI tweaks)
+    let plugins: Vec<(String, Option<String>)> =
+      self.loaded().into_iter().map(|p| { let state = self.host_id(&p).and_then(|id| save_state(id).ok()); (p, state) }).collect();
     self.stop();
     self.start(device)?;
-    for plugin in plugins {
+    for (plugin, state) in plugins {
       self.load(&plugin)?;
+      if let (Some(state), Some(id)) = (state, self.host_id(&plugin)) {
+        load_state(id, &state)?;
+      }
     }
     Ok(())
   }

@@ -82,3 +82,9 @@ WebKitGTK (the desktop webview) cannot play to a second output device (no `setSi
   keep process-wide state that assumes a single main thread, and with a thread per plugin a second
   instance could stall (seen as an intermittent unload timeout). The main thread loads, services
   (callbacks, timers, file descriptors, windows, in one poll) and unloads every plugin.
+- Done 2026-10-03: plugin state. CLAP's state extension: `clapState(name)` gives a loaded plugin's
+  state (its patch and everything set in its window) as text, `clap1:` and the state deflated in
+  base64 (Surge XT: ~7.7 KB), and `.clap(name, { state })` loads it before the plugin's notes (once
+  per state, in the mixer, on the native output and in exports). An export's instance starts as the
+  live plugin is; a mixer plugin reloaded at a new sample rate, and the native output moved to
+  another device, keep their state. Checked by a Rust test and desktop PLUG-1 (part 7).

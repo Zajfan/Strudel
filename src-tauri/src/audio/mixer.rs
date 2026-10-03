@@ -12,7 +12,7 @@ use std::time::{ Duration, Instant };
 
 use serde::Deserialize;
 
-use super::plugins::{ host_gui, load_plugin, wait_unloaded, Loaded, NewSlot, NoteEvent, ParamDesc, Slot, BLOCK, CHANNELS };
+use super::plugins::{ host_gui, load_plugin, load_state, save_state, wait_unloaded, Loaded, NewSlot, NoteEvent, ParamDesc, Slot, BLOCK, CHANNELS };
 
 #[derive(Deserialize)]
 pub struct MixNote {
@@ -153,20 +153,51 @@ impl MixerEngine {
       let guard = self.inner.lock().unwrap();
       guard.as_ref().and_then(|inner| inner.plugins.get(plugin).map(|&i| (i, inner.rates.get(&i) == Some(&sample_rate))))
     };
+    // reloaded at the new rate as it was (its patch, GUI tweaks)
+    let mut state = None;
     match loaded {
       Some((index, true)) => return Ok(index),
       Some((index, false)) => {
+        state = self.state(index).ok();
         self.unload_index(index)?;
       }
       None => {}
     }
-    let index = self.load_instance(plugin, sample_rate)?;
+    let index = self.add(plugin, sample_rate)?;
+    if let Some(state) = state {
+      self.set_state(index, &state)?;
+    }
     self.inner.lock().unwrap().as_mut().ok_or("no plugins loaded")?.plugins.insert(plugin.to_string(), index);
     Ok(index)
   }
 
   // Loads a new instance of a plugin, apart from the live one (for an export), and returns its index.
+  // It starts as the live one is, if that is loaded (its patch, GUI tweaks).
   pub fn load_instance(&self, plugin: &str, sample_rate: f64) -> Result<usize, String> {
+    let index = self.add(plugin, sample_rate)?;
+    if let Some(live) = self.index_of(plugin) {
+      if let Ok(state) = self.state(live) {
+        self.set_state(index, &state)?;
+      }
+    }
+    Ok(index)
+  }
+
+  // A plugin's state as text (see plugins::save_state), and loading one.
+  pub fn state(&self, plugin: usize) -> Result<String, String> {
+    save_state(self.host_id(plugin)?)
+  }
+
+  pub fn set_state(&self, plugin: usize, state: &str) -> Result<(), String> {
+    load_state(self.host_id(plugin)?, state)
+  }
+
+  fn host_id(&self, plugin: usize) -> Result<u64, String> {
+    let guard = self.inner.lock().unwrap();
+    guard.as_ref().and_then(|inner| inner.host_ids.get(&plugin).copied()).ok_or_else(|| "no such plugin".to_string())
+  }
+
+  fn add(&self, plugin: &str, sample_rate: f64) -> Result<usize, String> {
     let mut guard = self.inner.lock().unwrap();
     let inner = guard.get_or_insert_with(|| {
       let (commands, receiver) = channel();
@@ -299,6 +330,7 @@ impl MixerEngine {
     Ok(())
   }
 
+  #[cfg(test)]
   pub fn reset(&self) {
     let indices: Vec<usize> = self.inner.lock().unwrap().as_ref().map_or(Vec::new(), |inner| inner.rates.keys().copied().collect());
     for index in indices {
@@ -405,5 +437,40 @@ mod tests {
     assert_eq!(mixer.loaded(), vec!["Surge XT".to_string()]);
     mixer.reset();
     assert!(mixer.loaded().is_empty());
+  }
+
+  #[test]
+  fn saves_and_loads_a_plugins_state() {
+    if super::super::plugins::plugin_names().iter().all(|n| n != "Surge XT") {
+      println!("Surge XT missing, skipping");
+      return;
+    }
+    let sr = 48000.0;
+    let mixer = MixerEngine::default();
+    let rms_of_a_note = |index: usize| {
+      mixer.notes(index, vec![MixNote { time: 0.05, duration: 0.3, key: 60, velocity: 0.8 }]).unwrap();
+      let bytes = mixer.render(index, 0, 19200).unwrap();
+      let left: Vec<f32> = bytes.chunks_exact(8).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect();
+      (left.iter().map(|s| s * s).sum::<f32>() / left.len() as f32).sqrt()
+    };
+    let live = mixer.load("Surge XT", sr).unwrap();
+    let default_state = mixer.state(live).unwrap();
+    println!("state: {} characters", default_state.len());
+    assert!(default_state.starts_with("clap1:"));
+    // the live plugin's volume all the way down, as a GUI tweak would
+    let volume = mixer.param_list(live).unwrap().into_iter().find(|p| p.name.eq_ignore_ascii_case("Global Volume")).unwrap();
+    mixer.params(live, vec![MixParam { time: 0.0, id: volume.id, value: volume.min }]).unwrap();
+    mixer.render(live, 0, 512).unwrap();
+    // an export's instance starts as the live one is: silent
+    let export = mixer.load_instance("Surge XT", sr).unwrap();
+    let muted = rms_of_a_note(export);
+    // and the default state brings the volume back
+    mixer.set_state(export, &default_state).unwrap();
+    let restored = rms_of_a_note(export);
+    println!("rms muted {} restored {}", muted, restored);
+    assert!(restored > 0.01, "no sound after loading the default state");
+    assert!(muted < restored / 10.0, "the export instance didn't get the live state");
+    assert!(mixer.set_state(export, "not a state").is_err());
+    mixer.reset();
   }
 }

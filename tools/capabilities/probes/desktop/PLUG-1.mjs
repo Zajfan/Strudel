@@ -15,6 +15,9 @@
 // 6. Filters on the plugin's stream, in offline renders: lpf(300) must make it much darker, hpf(3000)
 //    brighter, and a filter envelope (lpf(200).lpenv(6), short decay) bright at each note's start
 //    and dark after. Brightness: the rms of the first difference over the rms.
+// 7. State: with the plugin freshly loaded, clapState gives its default state; after its volume is
+//    automated to 0 live, a different (muted) one. An export without a state starts as the live
+//    plugin is (silent); with { state: default } it sounds, and with { state: muted } it doesn't.
 // Without Surge XT in a CLAP folder this is not-run (see the follow-ups doc for installing it).
 
 import { execFileSync } from 'node:child_process';
@@ -115,6 +118,21 @@ async function playNative({ code, seconds, plugin, unload = true }) {
   const stats = await native.invoke('engine_stats');
   if (unload) await unloadClap(plugin);
   return { stats, samples: samples.length, rms: samples.length ? Math.sqrt(sumSq / samples.length) : 0, loadedAfterUnload: await loadedClaps() };
+}
+
+// plays code for a while in the page
+async function playFor({ code, seconds }) {
+  const m = window.strudelMirror;
+  try {
+    m.setCode(code);
+    await m.evaluate();
+    const error = String(m.repl.state.error || '');
+    if (error) return { error };
+    await new Promise((r) => setTimeout(r, seconds * 1000));
+  } finally {
+    m.stop();
+  }
+  return {};
 }
 
 const decode = (b64) => {
@@ -222,7 +240,10 @@ export async function probe({ page, thresholds }) {
   await new Promise((r) => setTimeout(r, 500));
   const guiClosed = !windows().includes(`"${guiTitle}"`);
 
-  // 5. exports: the plugin in a stem render (cps 1: notes at 0 and 0.5 s of each cycle, with rests between)
+  // 5. exports: the plugin in a stem render (cps 1: notes at 0 and 0.5 s of each cycle, with rests
+  // between), freshly loaded (an export's instance starts as the live plugin is, and part 2 turned
+  // its volume down)
+  await page.evaluate((plugin) => unloadClap(plugin), PLUGIN);
   const exportCycles = 3;
   let exported;
   try {
@@ -267,6 +288,39 @@ export async function probe({ page, thresholds }) {
     filterMetrics = { error: String(err?.message ?? err) };
   }
 
+  // 7. state
+  let stateMetrics;
+  try {
+    const rmsOfRender = async (state) => {
+      const stem = await renderPlugin(
+        state == null
+          ? () => note("c4 ~ e4 ~").clap('Surge XT')
+          : (0, eval)(`() => note("c4 ~ e4 ~").clap('Surge XT', { state: '${state}' })`),
+      );
+      return stem ? rmsOf(stem, 0, stem.length) : 0;
+    };
+    await page.evaluate((plugin) => unloadClap(plugin), PLUGIN);
+    const played = await page.evaluate(playFor, { code: `note("c4").clap('${PLUGIN}')`, seconds: 1 });
+    if (played.error) throw new Error(played.error);
+    const defaultState = await page.evaluate((plugin) => clapState(plugin), PLUGIN);
+    const muting = await page.evaluate(playFor, { code: `note("c4").clap('${PLUGIN}').auto(0, { c: 'Global Volume' })`, seconds: 1 });
+    if (muting.error) throw new Error(muting.error);
+    const mutedState = await page.evaluate((plugin) => clapState(plugin), PLUGIN);
+    const liveRms = await rmsOfRender(null);
+    const defaultRms = await rmsOfRender(defaultState);
+    const mutedRms = await rmsOfRender(mutedState);
+    stateMetrics = {
+      chars: defaultState.length,
+      prefix: defaultState.slice(0, 6),
+      differs: defaultState !== mutedState,
+      exportLikeLiveRms: liveRms,
+      exportDefaultRms: defaultRms,
+      exportMutedRms: mutedRms,
+    };
+  } catch (err) {
+    stateMetrics = { error: String(err?.message ?? err) };
+  }
+
   // 3. on a native output
   const native = await page.evaluate(playNative, { code: NATIVE_CODE, seconds: 3, plugin: PLUGIN, unload: false }, { timeoutMs: 120000 });
   // automation on the native output: the engine applies the parameter changes (counted). (Their
@@ -295,6 +349,7 @@ export async function probe({ page, thresholds }) {
           sineStemLeakRms: exported?.stems?.get(1) ? rmsOf(exported.stems.get(1), 26400, 33600) : null,
         },
     filters: filterMetrics,
+    state: stateMetrics,
     native: native.error
       ? { error: native.error }
       : {
@@ -331,6 +386,11 @@ export async function probe({ page, thresholds }) {
   if (!(filterMetrics.lpfDarkerDb >= 12)) return fail(`lpf(300) made the plugin only ${filterMetrics.lpfDarkerDb.toFixed(1)} dB darker`);
   if (!(filterMetrics.hpfBrighterDb >= 6)) return fail(`hpf(3000) made the plugin only ${filterMetrics.hpfBrighterDb.toFixed(1)} dB brighter`);
   if (!(filterMetrics.envelopeDropDb >= 6)) return fail(`the filter envelope darkened the note by only ${filterMetrics.envelopeDropDb.toFixed(1)} dB`);
+  if (stateMetrics.error) return fail(`state: ${stateMetrics.error}`);
+  if (stateMetrics.prefix !== 'clap1:' || !stateMetrics.differs) return fail('state: clapState gave no usable state, or the same one before and after muting');
+  if (!(stateMetrics.exportDefaultRms >= thresholds.minRms)) return fail(`state: the export with the default state is silent (${stateMetrics.exportDefaultRms})`);
+  if (!(stateMetrics.exportLikeLiveRms < stateMetrics.exportDefaultRms / 10)) return fail('state: the export did not start as the (muted) live plugin');
+  if (!(stateMetrics.exportMutedRms < stateMetrics.exportDefaultRms / 10)) return fail('state: { state: muted } did not mute the export');
   if (native.error) return fail(`native output: ${native.error}`);
   if (!(native.stats.notes >= 11) || native.stats.lateNotes > 0) return fail(`native output: ${native.stats.notes} notes, ${native.stats.lateNotes} late`);
   if (!(native.rms >= thresholds.minRms)) return fail(`native output rms ${native.rms}`);

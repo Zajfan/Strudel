@@ -24,9 +24,11 @@ rosc = "0.10.1"
 cpal = "0.15"
 rtrb = "0.4"
 clack-host = "=0.2.0"
-clack-extensions = { version = "=0.2.0", features = ["clack-host", "audio-ports", "note-ports", "log", "params", "gui", "timer", "posix-fd"] }
+clack-extensions = { version = "=0.2.0", features = ["clack-host", "audio-ports", "note-ports", "log", "params", "gui", "timer", "posix-fd", "state"] }
 x11rb = "0.13"
 libc = "0.2"
+base64 = "0.22"
+flate2 = "1"
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"

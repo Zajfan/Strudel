@@ -96,12 +96,12 @@ pub fn clap_loaded(engine: State<'_, PluginEngine>, mixer: State<'_, MixerEngine
 
 #[tauri::command]
 pub fn clap_unload(plugin: String, engine: State<'_, PluginEngine>, mixer: State<'_, MixerEngine>) -> Result<(), String> {
-  let in_mixer = mixer.unload(&plugin)?;
-  match engine.unload(&plugin) {
-    Ok(()) => Ok(()),
-    Err(_) if in_mixer => Ok(()),
-    Err(err) => Err(err),
+  // a plugin that isn't loaded is left as it is
+  mixer.unload(&plugin)?;
+  if engine.loaded().contains(&plugin) {
+    engine.unload(&plugin)?;
   }
+  Ok(())
 }
 
 // ------------------------------------------------------------------ plugins in the page's mixer
@@ -109,6 +109,36 @@ pub fn clap_unload(plugin: String, engine: State<'_, PluginEngine>, mixer: State
 #[tauri::command]
 pub fn mix_load(plugin: String, sample_rate: f64, mixer: State<'_, MixerEngine>) -> Result<usize, String> {
   mixer.load(&plugin, sample_rate)
+}
+
+// A loaded plugin's state (patch, GUI tweaks) as text for a pattern, from the mixer or else the native
+// output, and loading one into it (both, if loaded in both).
+#[tauri::command]
+pub fn clap_state(plugin: String, engine: State<'_, PluginEngine>, mixer: State<'_, MixerEngine>) -> Result<String, String> {
+  if let Some(index) = mixer.index_of(&plugin) {
+    return mixer.state(index);
+  }
+  let id = engine.host_id(&plugin).ok_or_else(|| format!("\"{}\" is not loaded", plugin))?;
+  plugins::save_state(id)
+}
+
+#[tauri::command]
+pub fn clap_set_state(plugin: String, state: String, engine: State<'_, PluginEngine>, mixer: State<'_, MixerEngine>) -> Result<(), String> {
+  let mut found = false;
+  if let Some(index) = mixer.index_of(&plugin) {
+    mixer.set_state(index, &state)?;
+    found = true;
+  }
+  if let Some(id) = engine.host_id(&plugin) {
+    plugins::load_state(id, &state)?;
+    found = true;
+  }
+  if found { Ok(()) } else { Err(format!("\"{}\" is not loaded", plugin)) }
+}
+
+#[tauri::command]
+pub fn mix_set_state(plugin: usize, state: String, mixer: State<'_, MixerEngine>) -> Result<(), String> {
+  mixer.set_state(plugin, &state)
 }
 
 // a separate instance of a plugin, for an export (offline render); unloaded with mix_unload

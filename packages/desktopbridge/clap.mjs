@@ -94,7 +94,8 @@ function getStream(plugin) {
       }
     };
     player.connect(getExternalChannel(`clap:${plugin}`).input);
-    return { index, params };
+    // state: the state last loaded from a pattern (see setState)
+    return { index, params, player, state: undefined, stateLoaded: Promise.resolve() };
   })();
   stream = { audioContext, ready };
   streams.set(plugin, stream);
@@ -120,6 +121,15 @@ function paramChanges(value, params, time, duration) {
   return changes;
 }
 
+// Loads a pattern's plugin state (.clap(name, { state })) into a mixer instance, once per state.
+function setState(instance, state) {
+  if (state != null && state !== instance.state) {
+    instance.state = state;
+    instance.stateLoaded = Invoke('mix_set_state', { plugin: instance.index, state });
+  }
+  return instance.stateLoaded;
+}
+
 // sends a hap's note and parameter changes to a plugin in the mixer engine, `time` in seconds
 async function sendToMixer({ index, params }, value, time, duration) {
   const { note, velocity = 0.9 } = value;
@@ -135,7 +145,10 @@ function playInMixer(plugin, hap, cps, targetTime) {
   const duration = hap.duration.valueOf() / cps;
   getExternalChannel(`clap:${plugin}`).update(hap.value, targetTime, cps, duration);
   getStream(plugin)
-    .ready.then((stream) => sendToMixer(stream, hap.value, targetTime, duration))
+    .ready.then(async (stream) => {
+      await setState(stream, hap.context.clapState);
+      await sendToMixer(stream, hap.value, targetTime, duration);
+    })
     .catch((err) => logger(`[clap] ${plugin}: ${err}`, 'error'));
 }
 
@@ -154,7 +167,8 @@ registerOfflineRenderer('clap', {
           (async () => {
             const index = await Invoke('mix_load_instance', { plugin, sampleRate });
             const params = new Map((await Invoke('mix_param_list', { plugin: index })).map((p) => [p.name.toLowerCase(), p]));
-            return { index, params };
+            // it starts as the live plugin is; a pattern's state goes over that
+            return { index, params, state: undefined, stateLoaded: Promise.resolve() };
           })(),
         );
       }
@@ -165,7 +179,9 @@ registerOfflineRenderer('clap', {
         const { clapPlugin: plugin } = hap.context;
         hap.ensureObjectValue();
         getExternalChannel(`clap:${plugin}`).update(hap.value, t, cps, duration);
-        await sendToMixer(await instance(plugin), hap.value, t, duration);
+        const loaded = await instance(plugin);
+        await setState(loaded, hap.context.clapState);
+        await sendToMixer(loaded, hap.value, t, duration);
       },
       async render(from, to) {
         const start = Math.round(from * sampleRate);
@@ -198,6 +214,8 @@ registerOfflineRenderer('clap', {
 // ------------------------------------------------------------------ on a native output
 // Lower latency, but outside the page's mixer: no Strudel effects, and only approximately in time
 // with the page's audio (both reach the OS mixer on their own).
+// the state last loaded into each plugin on the native output, from a pattern
+const nativeStates = new Map();
 // the native output's parameter lists, by plugin (fetched once it has loaded the plugin)
 const nativeParams = new Map();
 const getNativeParams = (plugin) => {
@@ -214,8 +232,16 @@ function playNative(plugin, hap, currentTime, cps, targetTime) {
   const time = toEpochMs(targetTime, currentTime);
   const duration = (hap.duration.valueOf() / cps) * 1000;
   const notes = note == null ? [] : [{ time, duration, key: toKey(note), velocity: Math.min(1, gain * velocity) }];
-  // clap_play loads the plugin (and starts the engine) if needed; parameters go after it
-  Invoke('clap_play', { plugin, notes })
+  // clap_play loads the plugin (and starts the engine) if needed; the state and parameters go after it
+  const { clapState: state } = hap.context;
+  const play =
+    state != null && nativeStates.get(plugin) !== state
+      ? Invoke('clap_play', { plugin, notes: [] }).then(() => {
+          nativeStates.set(plugin, state);
+          return Invoke('clap_set_state', { plugin, state }).then(() => Invoke('clap_play', { plugin, notes }));
+        })
+      : Invoke('clap_play', { plugin, notes });
+  play
     .then(async () => {
       if (!hap.value.auto) return;
       const changes = paramChanges(hap.value, await getNativeParams(plugin), time, duration);
@@ -239,10 +265,16 @@ function playNative(plugin, hap, currentTime, cps, targetTime) {
  * @param {string} plugin the plugin's file name without .clap, e.g. 'Surge XT'
  * @param {Object} [options]
  * @param {string} [options.output] 'mixer' (default) or 'native'
+ * The plugin's state (its patch and everything set in its window) is saved with the pattern by
+ * pasting what clapState(name) gives into `state`:
+ *   note("c3 e3").clap('Surge XT', { state: 'clap1:eNrtW...' })
  * @param {boolean} [options.gui] open the plugin's own window once it has loaded (see clapGui)
+ * @param {string} [options.state] a state from clapState, loaded into the plugin before its notes
  */
-Pattern.prototype.clap = function (plugin, { output = 'mixer', gui = false } = {}) {
-  const pattern = this.withHap((hap) => hap.setContext({ ...hap.context, offlineRenderer: 'clap', clapPlugin: plugin }));
+Pattern.prototype.clap = function (plugin, { output = 'mixer', gui = false, state } = {}) {
+  const pattern = this.withHap((hap) =>
+    hap.setContext({ ...hap.context, offlineRenderer: 'clap', clapPlugin: plugin, clapState: state }),
+  );
   return pattern.onTrigger((hap, currentTime, cps, targetTime) => {
     hap.ensureObjectValue();
     if (gui && !guiOpened.has(plugin)) {
@@ -276,6 +308,28 @@ export const clapPlugins = () => Invoke('clap_plugins');
 export const setPluginDevice = (name) =>
   Invoke('engine_set_device', { device: name && name !== 'System Standard' ? name : null });
 
+/**
+ * The state of a loaded plugin (its patch and everything set in its window), as text to save with
+ * the pattern: `.clap(name, { state })`. Also copied to the clipboard where the page may.
+ * @param {string} plugin the plugin's name, as for clap
+ * @returns {Promise<string>}
+ */
+export const clapState = async (plugin) => {
+  const state = await Invoke('clap_state', { plugin });
+  const copied = await navigator.clipboard?.writeText(state).then(
+    () => true,
+    () => false,
+  );
+  logger(`[clap] ${plugin}: state of ${state.length} characters${copied ? ', copied to the clipboard' : ''}`);
+  return state;
+};
+
 // the plugins currently loaded, and unloading one (it is loaded again on its next note)
 export const loadedClaps = () => Invoke('clap_loaded');
-export const unloadClap = (plugin) => Invoke('clap_unload', { plugin });
+export const unloadClap = async (plugin) => {
+  const stream = streams.get(plugin);
+  streams.delete(plugin);
+  nativeStates.delete(plugin);
+  stream?.ready.then(({ player }) => player.disconnect()).catch(() => {});
+  return Invoke('clap_unload', { plugin });
+};

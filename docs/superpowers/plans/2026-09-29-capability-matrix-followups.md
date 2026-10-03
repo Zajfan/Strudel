@@ -129,3 +129,10 @@ iterBack, saw #1, isaw #1, scaleTranspose, scale #4. Not reproduced in 11 later 
 file-order shuffled (6 seeds), and with doc.json regeneration. (Shuffling tests *within* files fails
 30-40 tests on every seed: upstream test files depend on their own order.) If it recurs, keep the
 failure output: the messages are needed to find the cause.
+
+## Timing test flake (2026-10-03)
+
+packages/cli/test/midi.test.mjs `sendAt > sends once the clock reaches the time, not before` failed
+once (sent 5.54 ms late, bound 5 ms) in a full run started right after `cargo test` runs, on a
+busy machine. Passed in the next 3 full runs. It measures a real setTimeout + spin on the wall
+clock, so heavy load can push it over; if it recurs on an idle machine, look at sendAt's spin.
