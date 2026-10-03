@@ -44,6 +44,8 @@ export function appEnv(display) {
     WEBKIT_DISABLE_COMPOSITING_MODE: '1',
     LIBGL_ALWAYS_SOFTWARE: '1',
     GST_PLUGIN_FEATURE_RANK: 'fakeaudiosink:MAX',
+    // the silent device has no clock: the app's audio paces itself to the wall clock on it
+    STRUDEL_PACE_AUDIO: '1',
   });
   return env;
 }

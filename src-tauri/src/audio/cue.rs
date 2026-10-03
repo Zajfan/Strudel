@@ -24,6 +24,33 @@ const CAPACITY_MS: f64 = 1000.0;
 // at most this much played output is kept for cue_capture (blocks that played buffered audio)
 const CAPTURE_SECONDS: usize = 10;
 
+// Pacing for devices without a clock. ALSA's `null` device (the test harness's silent "strudel_null")
+// takes audio as fast as it is given, so its callback runs flat out: a jitter buffer fed in real time
+// runs dry, and nothing behaves as on a real device. With STRUDEL_PACE_AUDIO=1 (set by the test
+// harness only), each callback waits until the wall clock has caught up with the frames played so
+// far, which makes such a device run in real time. Real devices are never paced.
+pub(crate) struct Pacer {
+  started: Option<std::time::Instant>,
+  frames: u64,
+  sample_rate: f64,
+}
+
+impl Pacer {
+  pub(crate) fn new(sample_rate: f64) -> Option<Self> {
+    (std::env::var("STRUDEL_PACE_AUDIO").as_deref() == Ok("1")).then(|| Pacer { started: None, frames: 0, sample_rate })
+  }
+  // call after a callback has filled `frames` frames
+  pub(crate) fn pace(&mut self, frames: usize) {
+    let started = *self.started.get_or_insert_with(std::time::Instant::now);
+    self.frames += frames as u64;
+    let due = started + std::time::Duration::from_secs_f64(self.frames as f64 / self.sample_rate);
+    let now = std::time::Instant::now();
+    if due > now {
+      std::thread::sleep(due - now);
+    }
+  }
+}
+
 #[derive(Default)]
 struct Stats {
   underruns: AtomicU64,
@@ -71,11 +98,17 @@ struct Playout {
   buffering: bool,
   last: Vec<f32>,
   played: u64,
+  // after a jump: frames left of the crossfade from the frame before it
+  fade: usize,
+  faded_from: Vec<f32>,
 }
+
+// how many frames a jump (shedding a backlog at once) crossfades over
+const JUMP_FADE: usize = 32;
 
 impl Playout {
   fn new(channels: usize, target: usize, band: usize) -> Self {
-    Playout { channels, target, band, buffering: true, last: vec![0.0; channels], played: 0 }
+    Playout { channels, target, band, buffering: true, last: vec![0.0; channels], played: 0, fade: 0, faded_from: vec![0.0; channels] }
   }
 
   // Fills `out` (interleaved) from `consumer`; returns the frames left buffered.
@@ -96,8 +129,19 @@ impl Playout {
         frame.fill(0.0);
         continue;
       }
-      if fill > self.target + self.band {
-        // running high: skip a frame
+      if fill > self.target + 2 * self.band {
+        // far too much buffered (a burst): back to the target at once, in one jump that crossfades
+        // (skipping a frame per frame instead would play a stretch at double speed)
+        let excess = fill - self.target;
+        for _ in 0..excess * ch {
+          let _ = consumer.pop();
+        }
+        fill -= excess;
+        stats.frames_dropped.fetch_add(excess as u64, Ordering::Relaxed);
+        self.fade = JUMP_FADE;
+        self.faded_from.copy_from_slice(&self.last);
+      } else if fill > self.target + self.band && self.played % 64 == 0 {
+        // a little high (the clocks drift): skip one frame now and then
         for _ in 0..ch {
           let _ = consumer.pop();
         }
@@ -116,6 +160,13 @@ impl Playout {
         for (i, sample) in frame.iter_mut().enumerate() {
           *sample = consumer.pop().unwrap_or(0.0);
           self.last[i] = *sample;
+        }
+        if self.fade > 0 {
+          let w = self.fade as f32 / (JUMP_FADE + 1) as f32;
+          for (i, sample) in frame.iter_mut().enumerate() {
+            *sample = w * self.faded_from[i] + (1.0 - w) * *sample;
+          }
+          self.fade -= 1;
         }
         fill -= 1;
       }
@@ -180,6 +231,7 @@ impl CueState {
         };
         let stats = thread_stats;
         let mut playout = Playout::new(ch, target, band);
+        let mut pacer = Pacer::new(sample_rate as f64);
         let stream = device
           .build_output_stream(
             &config,
@@ -196,6 +248,9 @@ impl CueState {
                     captured.pop_front();
                   }
                 }
+              }
+              if let Some(pacer) = pacer.as_mut() {
+                pacer.pace(out.len() / ch);
               }
             },
             |err| eprintln!("[cue] stream error: {}", err),
@@ -424,6 +479,35 @@ pub(crate) mod tests {
     let sounding: Vec<f32> = played.into_iter().skip_while(|s| *s == 0.0).collect();
     assert!(sounding.windows(2).all(|w| w[1] == w[0] + 1.0), "out of order");
     assert_eq!(stats.underruns.load(Ordering::Relaxed), 0);
+  }
+
+  #[test]
+  fn sheds_a_burst_in_one_jump() {
+    let (mut producer, mut consumer) = RingBuffer::<f32>::new(48000);
+    let stats = Stats::default();
+    let mut playout = Playout::new(1, 100, 50);
+    let mut next = 1.0f32;
+    let mut played = Vec::new();
+    // a backlog of 1000 frames arrives at once, then audio at the playing rate
+    for _ in 0..1000 {
+      producer.push(next).unwrap();
+      next += 1.0;
+    }
+    for _ in 0..50 {
+      for _ in 0..64 {
+        producer.push(next).unwrap();
+        next += 1.0;
+      }
+      let mut out = vec![0.0f32; 64];
+      playout.render(&mut out, &mut consumer, &stats);
+      played.extend(out);
+    }
+    // apart from the crossfade after the jump, every frame follows the one before
+    let jumps: Vec<usize> = played.windows(2).enumerate().filter(|(_, w)| w[1] != w[0] + 1.0).map(|(i, _)| i).collect();
+    let first = jumps[0];
+    assert!(jumps.iter().all(|&i| i <= first + JUMP_FADE), "more than one jump: {:?}", &jumps[..jumps.len().min(40)]);
+    let dropped = stats.frames_dropped.load(Ordering::Relaxed);
+    assert!(dropped > 800, "dropped {}", dropped);
   }
 
   #[test]

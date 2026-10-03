@@ -140,7 +140,7 @@ loaded machine wakes the timer late. Fixed 2026-10-03: the unit test now checks 
 controlled clock (fake timers; timer first, then the spin, sends at the time and not before), and
 real-clock precision stays measured where it belongs, by the CLI SYNC-1 probe (0.23 ms max jitter).
 
-## Desktop CUE-1 flake (2026-10-03, not fixed)
+## Desktop CUE-1 flake (2026-10-03, fixed the same day)
 
 Desktop CUE-1 passes about half the time, on the code before and after the effect-plugin work
 (3 runs each way): it fails either "the main pattern leaks into the device cue" (separation 22-38 dB)
@@ -166,3 +166,14 @@ points where the signal gets louder, not quieter (beforeRms 0.017, afterRms 0.09
 the wrong places. The next two runs passed (33.5 dB). Nothing in the browser path had changed (the
 work was desktop-only). The offline part of the same run was right (33.5 dB duck). Likely the live
 recording's alignment to the triggers; to look at with the long-session work.
+
+Fixed 2026-10-03, two causes:
+- The test device has no clock. The app now paces its own audio callbacks (cue output and the
+  native plugin output) to the wall clock when STRUDEL_PACE_AUDIO=1, which only the desktop harness
+  sets: on ALSA's null device the callbacks ran flat out. Real devices are never paced.
+- The cue's playout shed a backlog by skipping a frame on every frame until back in band: a stretch
+  at double speed, whose octave-up, smeared audio the probe read as the main pattern leaking in. A
+  burst (more than target + 2 bands) is now cut in one jump with a 32-frame crossfade; drift above
+  the band is still corrected one frame now and then (unit test sheds_a_burst_in_one_jump). This
+  applies to real headphones too.
+Desktop CUE-1 then passed 5 of 5 (device separation 54-65 dB, was 22-50 dB; underruns 5-9, was ~46).

@@ -974,6 +974,7 @@ impl PluginEngine {
         };
         let sr = sample_rate as f64;
         let mut slots: Vec<NativeSlot> = Vec::new();
+        let mut pacer = super::cue::Pacer::new(sr);
         let mut pending: Vec<NoteEvent> = Vec::new();
         let mut pending_params: Vec<ParamEvent> = Vec::new();
         let mut block_params: Vec<(u32, u32, f64)> = Vec::with_capacity(256);
@@ -1064,6 +1065,9 @@ impl PluginEngine {
               t_stats.blocks.fetch_add(1, Ordering::Relaxed);
               t_stats.frames.fetch_add(frames as u64, Ordering::Relaxed);
               t_stats.plugins.store(slots.len() as u64, Ordering::Relaxed);
+              if let Some(pacer) = pacer.as_mut() {
+                pacer.pace(frames);
+              }
               if t_capturing.load(Ordering::Relaxed) && out.iter().any(|s| *s != 0.0) {
                 if let Ok(mut captured) = t_capture.try_lock() {
                   if captured.len() < CAPTURE_SECONDS * sample_rate as usize * CHANNELS {
