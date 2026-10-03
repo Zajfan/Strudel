@@ -16,22 +16,95 @@ const hasChanged = (now, before) => now !== undefined && now !== before;
 // switches from mono to stereo
 const getStereoNode = (ac) => new GainNode(ac, { gain: 1, channelCount: 2, channelCountMode: 'explicit' });
 
+// Inserts: effects outside superdough on an orbit or the master (such as the desktop app's effect
+// plugins), set by an insert provider (setInsertProvider):
+//   { create(audioContext, chain) -> insert }
+// where chain is the inserts' description from the pattern (opaque here: hap values' `inserts`, or
+// setMasterInserts) and an insert is
+//   { input: AudioNode, output: AudioNode, latency: seconds, setChain(chain), disconnect(),
+//     onHap?(value, t, duration) }
+// create gets a third argument, { key }: 'orbit <n>' or 'master'. onHap is told of each hap that
+// plays through the insert (for automation), with t on the insert's input clock.
+// An insert's output is its input `latency` later, so whatever plays through it is scheduled that
+// much early (see SuperdoughAudioController.latency): it is heard at its time.
+let insertProvider;
+export function setInsertProvider(provider) {
+  insertProvider = provider;
+}
+export function getInsertProvider() {
+  return insertProvider;
+}
+
+const chainKey = (chain) => (chain?.length ? JSON.stringify(chain) : '');
+
+// An insert point: input -> [insert] -> output, with nothing in between until a chain is set.
+class InsertPoint {
+  constructor(audioContext, input, output, name) {
+    this.name = name;
+    this.audioContext = audioContext;
+    this.input = input;
+    this.output = output;
+    this.key = '';
+    this.insert = null;
+    input.connect(output);
+  }
+  get latency() {
+    return this.insert?.latency ?? 0;
+  }
+  setChain(chain) {
+    const key = chainKey(chain);
+    if (key === this.key) return;
+    this.key = key;
+    if (!key) {
+      if (this.insert) {
+        this.input.disconnect(this.insert.input);
+        this.insert.disconnect();
+        this.insert = null;
+        this.input.connect(this.output);
+      }
+      return;
+    }
+    if (this.insert) {
+      this.insert.setChain(chain);
+      return;
+    }
+    if (!insertProvider || this.audioContext instanceof OfflineAudioContext) {
+      // no inserts here (in the browser, or in renders, which apply them per stem)
+      return;
+    }
+    this.insert = insertProvider.create(this.audioContext, chain, { key: this.name });
+    this.input.disconnect(this.output);
+    this.input.connect(this.insert.input);
+    this.insert.output.connect(this.output);
+  }
+  disconnect() {
+    this.insert?.disconnect();
+    this.insert = null;
+  }
+}
+
 export class Orbit {
   reverbNode;
   delayNode;
   output;
+  // after the output (and its duck gain): the orbit's insert, then what goes to the destination
+  post;
   summingNode;
   djfNode;
   audioContext;
 
-  constructor(audioContext) {
+  constructor(audioContext, name = 'orbit') {
     this.audioContext = audioContext;
     this.output = getStereoNode(audioContext);
+    this.post = getStereoNode(audioContext);
+    this.inserts = new InsertPoint(audioContext, this.output, this.post, name);
     this.summingNode = getStereoNode(audioContext);
     this.summingNode.connect(this.output);
   }
 
   disconnect() {
+    this.inserts.disconnect();
+    this.post.disconnect();
     this.output.disconnect();
     this.summingNode.disconnect();
     this.delayNode?.disconnect();
@@ -165,7 +238,10 @@ export class SuperdoughOutput {
     this.channelMerger = new ChannelMergerNode(audioContext, { numberOfInputs: audioContext.destination.channelCount });
     this.destinationGain = new GainNode(audioContext);
     this.channelMerger.connect(this.destinationGain);
-    this.destinationGain.connect(audioContext.destination);
+    // the master insert (setMasterInserts) is stereo: it takes the first two channels
+    this.masterOut = new GainNode(audioContext);
+    this.inserts = new InsertPoint(audioContext, this.destinationGain, this.masterOut, 'master');
+    this.masterOut.connect(audioContext.destination);
   }
 
   reset() {
@@ -173,10 +249,13 @@ export class SuperdoughOutput {
     this.initializeAudio();
   }
   disconnect() {
+    this.inserts.disconnect();
     this.channelMerger.disconnect();
     this.destinationGain.disconnect();
+    this.masterOut.disconnect();
     this.destinationGain = null;
     this.channelMerger = null;
+    this.masterOut = null;
   }
   connectToDestination = (input, channels = [0, 1]) => {
     //This upmix can be removed if correct channel counts are set throughout the app,
@@ -296,21 +375,51 @@ export class SuperdoughAudioController {
       const attack = Math.max(attackArr[idx] ?? attackArr[0] ?? 0.1, 0.002);
       const depth = depthArr[idx] ?? depthArr[0];
 
-      orbit.duck(t, onset, attack, depth);
+      // the target is heard its latency after it plays (see latency)
+      orbit.duck(t - this.latency(target), onset, attack, depth);
     });
+  }
+
+  // How early what plays on an orbit must be scheduled to be heard at its time: its insert's latency
+  // and the master's. (Cue orbits have neither.)
+  latency(orbitNum, cue = false) {
+    if (cue) return 0;
+    return (this.nodes[orbitNum]?.inserts.latency ?? 0) + this.output.inserts.latency;
+  }
+
+  // sets an orbit's insert chain (from a hap's `inserts`; none: no insert)
+  setOrbitInserts(orbitNum, chain) {
+    this.nodes[orbitNum]?.inserts.setChain(chain);
+  }
+
+  setMasterInserts(chain) {
+    this.output.inserts.setChain(chain);
+  }
+
+  syncOrbitInserts(chains) {
+    for (const [orbitNum, orbit] of Object.entries(this.nodes)) {
+      orbit.inserts.setChain(chains.get(Number(orbitNum)) ?? chains.get(orbitNum));
+    }
+  }
+
+  // tells the inserts a hap heard at t plays through (its orbit's, then the master's)
+  notifyInserts(orbitNum, value, t, duration) {
+    const masterLatency = this.output.inserts.latency;
+    this.nodes[orbitNum]?.inserts.insert?.onHap?.(value, t - this.latency(orbitNum), duration);
+    this.output.inserts.insert?.onHap?.(value, t - masterLatency, duration);
   }
 
   getOrbit(orbitNum, channels, cue = false) {
     if (cue) {
       if (this.cueNodes[orbitNum] == null) {
         this.cueNodes[orbitNum] = new Orbit(this.audioContext);
-        this.cueNodes[orbitNum].output.connect(this.getCueOutput().destination);
+        this.cueNodes[orbitNum].post.connect(this.getCueOutput().destination);
       }
       return this.cueNodes[orbitNum];
     }
     if (this.nodes[orbitNum] == null) {
-      this.nodes[orbitNum] = new Orbit(this.audioContext);
-      this.output.connectToDestination(this.nodes[orbitNum].output, channels);
+      this.nodes[orbitNum] = new Orbit(this.audioContext, `orbit ${orbitNum}`);
+      this.output.connectToDestination(this.nodes[orbitNum].post, channels);
     }
     return this.nodes[orbitNum];
   }

@@ -139,3 +139,12 @@ measured a real setTimeout + spin on the wall clock while vitest runs test files
 loaded machine wakes the timer late. Fixed 2026-10-03: the unit test now checks sendAt's logic on a
 controlled clock (fake timers; timer first, then the spin, sends at the time and not before), and
 real-clock precision stays measured where it belongs, by the CLI SYNC-1 probe (0.23 ms max jitter).
+
+## Desktop CUE-1 flake (2026-10-03, not fixed)
+
+Desktop CUE-1 passes about half the time, on the code before and after the effect-plugin work
+(3 runs each way): it fails either "the main pattern leaks into the device cue" (separation 22-38 dB)
+or "the native cue output played no cue on the device". Every run, passing or not, has ~46 underruns.
+The likely cause is the test device: strudel_null has no clock, so cpal's callback runs as fast as
+it can, the cue's jitter buffer runs dry, and what the capture holds depends on timing. A clocked
+silent device (or capturing on the webview's clock) would make the probe measure the cue itself.

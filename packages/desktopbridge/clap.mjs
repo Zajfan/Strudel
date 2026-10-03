@@ -109,12 +109,15 @@ const toKey = (note) => (typeof note === 'number' ? Math.round(note) : noteToMid
 
 // The hap's automation curves (see `auto`) that name one of the plugin's parameters, as timed plain
 // values: each curve spans the note, and the parameter keeps its last value afterwards. `time` and
-// `duration` in any unit (seconds for the mixer, epoch ms for the native output).
-function paramChanges(value, params, time, duration) {
+// `duration` in any unit (seconds for the mixer, epoch ms for the native output). With a `prefix`
+// (lower case), only controls named "<prefix><parameter>" count (effects: "glue:ratio").
+export function paramChanges(value, params, time, duration, prefix = '') {
   const changes = [];
   for (const id of value.auto?.__ids ?? []) {
     const { control, curve } = value.auto[id];
-    const param = params.get(String(control).toLowerCase());
+    const name = String(control).toLowerCase();
+    if (!name.startsWith(prefix)) continue;
+    const param = params.get(name.slice(prefix.length));
     if (!param) continue;
     curve.forEach((x, k) => {
       const at = time + (curve.length > 1 ? (duration * k) / (curve.length - 1) : 0);
@@ -146,11 +149,12 @@ async function sendToMixer({ index, params }, value, time, duration) {
 function playInMixer(name, plugin, hap, cps, targetTime) {
   // the channel takes the hap's controls (gain, pan, orbit, delay, room, cue, filters) from this time
   const duration = hap.duration.valueOf() / cps;
-  getExternalChannel(`clap:${name}`).update(hap.value, targetTime, cps, duration);
+  // (when the plugin's stream must carry the note: earlier, on an orbit with an effect plugin)
+  const time = getExternalChannel(`clap:${name}`).update(hap.value, targetTime, cps, duration);
   getStream(name, plugin)
     .ready.then(async (stream) => {
       await setState(stream, hap.context.clapState);
-      await sendToMixer(stream, hap.value, targetTime, duration);
+      await sendToMixer(stream, hap.value, time, duration);
     })
     .catch((err) => logger(`[clap] ${name}: ${err}`, 'error'));
 }

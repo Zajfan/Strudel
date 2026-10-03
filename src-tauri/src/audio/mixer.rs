@@ -12,7 +12,7 @@ use std::time::{ Duration, Instant };
 
 use serde::Deserialize;
 
-use super::plugins::{ gui_title, host_gui, load_plugin, load_state, save_state, wait_unloaded, Loaded, NewSlot, NoteEvent, ParamDesc, Slot, BLOCK, CHANNELS };
+use super::plugins::{ gui_title, host_gui, load_plugin_kind, load_state, save_state, wait_unloaded, Loaded, NewSlot, NoteEvent, ParamDesc, Slot, BLOCK, CHANNELS };
 
 #[derive(Deserialize)]
 pub struct MixNote {
@@ -52,6 +52,8 @@ enum Command {
   Notes(usize, Vec<FrameNote>),
   Params(usize, Vec<FrameParam>),
   Render { plugin: usize, start: i64, frames: usize, reply: Sender<Vec<u8>> },
+  // runs interleaved stereo input for frames [start, start + n) through a chain of effects in order
+  Process { chain: Vec<usize>, start: i64, input: Vec<f32>, reply: Sender<Vec<u8>> },
   Remove(usize),
 }
 
@@ -59,8 +61,9 @@ struct Inner {
   commands: Sender<Command>,
   // the live plugins by name (one instance each); export renders load their own instances, by index only
   plugins: HashMap<String, usize>,
-  // which plugin each index is
+  // which plugin each index is, and which are effects
   names: HashMap<usize, String>,
+  effects: std::collections::HashSet<usize>,
   // per plugin index: the sample rate it was loaded for (the page's, or an export's)
   rates: HashMap<usize, f64>,
   params: HashMap<usize, Vec<ParamDesc>>,
@@ -134,6 +137,36 @@ fn render_thread(commands: Receiver<Command>) {
         }
         let _ = reply.send(out.iter().flat_map(|s| s.to_le_bytes()).collect());
       }
+      Command::Process { chain, start, input, reply } => {
+        let frames = input.len() / CHANNELS;
+        let mut signal = input;
+        for plugin in chain {
+          let Some((slot, _, pending_params)) = slots.get_mut(&plugin) else {
+            continue;
+          };
+          let mut out = vec![0.0f32; frames * CHANNELS];
+          let mut done = 0usize;
+          while done < frames {
+            let n = BLOCK.min(frames - done);
+            let from = start + done as i64;
+            let to = from + n as i64;
+            block_params.clear();
+            pending_params.retain(|param| {
+              if param.frame >= to {
+                return true;
+              }
+              block_params.push(((param.frame - from).max(0) as u32, param.id, param.value));
+              false
+            });
+            block_params.sort_by_key(|(o, _, _)| *o);
+            let range = done * CHANNELS..(done + n) * CHANNELS;
+            slot.process_with_params(&signal[range.clone()], &mut out[range], n, &block_params);
+            done += n;
+          }
+          signal = out;
+        }
+        let _ = reply.send(signal.iter().flat_map(|s| s.to_le_bytes()).collect());
+      }
       Command::Remove(plugin) => {
         if let Some((slot, _, _)) = slots.remove(&plugin) {
           slot.retire();
@@ -157,11 +190,20 @@ impl MixerEngine {
   // index. If it was loaded for another rate (a new AudioContext), it is reloaded at the new one, as
   // it was; an instance of another plugin by that name is replaced.
   pub fn load_as(&self, name: &str, plugin: &str, sample_rate: f64) -> Result<usize, String> {
+    self.load_kind_as(name, plugin, sample_rate, false)
+  }
+
+  // the same for an effect plugin (an instance of the bundle's audio effect)
+  pub fn load_effect_as(&self, name: &str, plugin: &str, sample_rate: f64) -> Result<usize, String> {
+    self.load_kind_as(name, plugin, sample_rate, true)
+  }
+
+  fn load_kind_as(&self, name: &str, plugin: &str, sample_rate: f64, effect: bool) -> Result<usize, String> {
     let loaded = {
       let guard = self.inner.lock().unwrap();
       guard.as_ref().and_then(|inner| {
         let index = *inner.plugins.get(name)?;
-        let same_plugin = inner.names.get(&index).map_or(false, |p| p == plugin);
+        let same_plugin = inner.names.get(&index).map_or(false, |p| p == plugin) && inner.effects.contains(&index) == effect;
         Some((index, same_plugin, inner.rates.get(&index) == Some(&sample_rate)))
       })
     };
@@ -169,7 +211,7 @@ impl MixerEngine {
       return Ok(index);
     }
     // the new instance first: if it can't load, the old one stays
-    let index = self.add(plugin, sample_rate)?;
+    let index = self.add(plugin, sample_rate, effect)?;
     if let Some((old, same_plugin, _)) = loaded {
       if same_plugin {
         if let Ok(state) = self.state(old) {
@@ -190,10 +232,20 @@ impl MixerEngine {
   }
 
   pub fn load_instance_of(&self, name: &str, plugin: &str, sample_rate: f64) -> Result<usize, String> {
-    let index = self.add(plugin, sample_rate)?;
+    self.load_kind_instance_of(name, plugin, sample_rate, false)
+  }
+
+  pub fn load_effect_instance_of(&self, name: &str, plugin: &str, sample_rate: f64) -> Result<usize, String> {
+    self.load_kind_instance_of(name, plugin, sample_rate, true)
+  }
+
+  fn load_kind_instance_of(&self, name: &str, plugin: &str, sample_rate: f64, effect: bool) -> Result<usize, String> {
+    let index = self.add(plugin, sample_rate, effect)?;
     let live = {
       let guard = self.inner.lock().unwrap();
-      guard.as_ref().and_then(|inner| inner.plugins.get(name).copied().filter(|i| inner.names.get(i).map_or(false, |p| p == plugin)))
+      guard.as_ref().and_then(|inner| {
+        inner.plugins.get(name).copied().filter(|i| inner.names.get(i).map_or(false, |p| p == plugin) && inner.effects.contains(i) == effect)
+      })
     };
     if let Some(live) = live {
       if let Ok(state) = self.state(live) {
@@ -217,7 +269,7 @@ impl MixerEngine {
     guard.as_ref().and_then(|inner| inner.host_ids.get(&plugin).copied()).ok_or_else(|| "no such plugin".to_string())
   }
 
-  fn add(&self, plugin: &str, sample_rate: f64) -> Result<usize, String> {
+  fn add(&self, plugin: &str, sample_rate: f64, effect: bool) -> Result<usize, String> {
     let mut guard = self.inner.lock().unwrap();
     let inner = guard.get_or_insert_with(|| {
       let (commands, receiver) = channel();
@@ -226,6 +278,7 @@ impl MixerEngine {
         commands,
         plugins: HashMap::new(),
         names: HashMap::new(),
+        effects: std::collections::HashSet::new(),
         rates: HashMap::new(),
         params: HashMap::new(),
         unloaded: HashMap::new(),
@@ -235,11 +288,14 @@ impl MixerEngine {
     });
     let index = inner.next_index;
     inner.next_index += 1;
-    let Loaded { slot, unloaded, id } = load_plugin(plugin, index, sample_rate)?;
+    let Loaded { slot, unloaded, id } = load_plugin_kind(plugin, index, sample_rate, effect)?;
     inner.host_ids.insert(index, id);
     inner.unloaded.insert(index, unloaded);
     inner.rates.insert(index, sample_rate);
     inner.names.insert(index, plugin.to_string());
+    if effect {
+      inner.effects.insert(index);
+    }
     inner.params.insert(index, slot.layout.params.clone());
     inner.commands.send(Command::Add(slot)).map_err(|e| e.to_string())?;
     Ok(index)
@@ -315,6 +371,21 @@ impl MixerEngine {
     rendered.recv_timeout(Duration::from_secs(2)).map_err(|e| e.to_string())
   }
 
+  // Runs interleaved stereo f32 input, for frames [start, ...) of the page's clock, through a chain
+  // of loaded effects, returning their output (the same layout, as little-endian bytes).
+  pub fn process(&self, chain: Vec<usize>, start: i64, input: Vec<f32>) -> Result<Vec<u8>, String> {
+    let (reply, processed) = channel();
+    {
+      let guard = self.inner.lock().unwrap();
+      let inner = guard.as_ref().ok_or("no plugins loaded")?;
+      if let Some(missing) = chain.iter().find(|i| !inner.effects.contains(i)) {
+        return Err(format!("plugin {} is not a loaded effect", missing));
+      }
+      inner.commands.send(Command::Process { chain, start, input, reply }).map_err(|e| e.to_string())?;
+    }
+    processed.recv_timeout(Duration::from_secs(2)).map_err(|e| e.to_string())
+  }
+
   pub fn loaded(&self) -> Vec<String> {
     let guard = self.inner.lock().unwrap();
     let Some(inner) = guard.as_ref() else {
@@ -345,6 +416,7 @@ impl MixerEngine {
       inner.plugins.retain(|_, i| *i != index);
       inner.params.remove(&index);
       inner.names.remove(&index);
+      inner.effects.remove(&index);
       inner.host_ids.remove(&index);
       inner.commands.send(Command::Remove(index)).map_err(|e| e.to_string())?;
       inner.unloaded.remove(&index)
@@ -532,6 +604,42 @@ mod tests {
     // "bass" as a plugin that can't load (an effect) leaves it as it was
     assert!(mixer.load_as("bass", "Surge XT Effects", sr).is_err());
     assert_eq!(mixer.index_of("bass"), Some(bass));
+    mixer.reset();
+  }
+
+  #[test]
+  fn runs_audio_through_an_effect_chain() {
+    if super::super::plugins::plugin_names().iter().all(|n| n != "Surge XT Effects") {
+      println!("Surge XT Effects missing, skipping");
+      return;
+    }
+    let sr = 48000.0;
+    let mixer = MixerEngine::default();
+    let fx = mixer.load_effect_as("verb", "Surge XT Effects", sr).unwrap();
+    let params = mixer.param_list(fx).unwrap();
+    println!("{} parameters: {:?}", params.len(), params.iter().take(40).map(|p| (&p.name, p.min, p.max, p.default)).collect::<Vec<_>>());
+    // a short burst of a 440 Hz sine, then silence
+    let frames = 48000usize;
+    let mut input = vec![0.0f32; frames * CHANNELS];
+    for i in 0..4800 {
+      let x = (i as f32 * 440.0 * std::f32::consts::TAU / 48000.0).sin() * 0.5;
+      input[i * 2] = x;
+      input[i * 2 + 1] = x;
+    }
+    let mut out = Vec::new();
+    for chunk in 0..(frames / 512) {
+      let part = input[chunk * 512 * CHANNELS..(chunk + 1) * 512 * CHANNELS].to_vec();
+      let bytes = mixer.process(vec![fx], (chunk * 512) as i64, part).unwrap();
+      out.extend(bytes.chunks_exact(8).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])));
+    }
+    let rms = |from: usize, to: usize| (out[from..to].iter().map(|s| s * s).sum::<f32>() / (to - from) as f32).sqrt();
+    println!("rms burst {} tail {}", rms(0, 4800), rms(9600, 24000));
+    assert!(rms(0, 4800) > 0.01, "nothing came through the effect");
+    // Surge XT Effects' default effect leaves a tail: the audio was processed, not passed through
+    assert!(rms(9600, 24000) > 0.01, "no effect tail after the burst");
+    // an instrument isn't an effect
+    let synth = mixer.load_as("synth", "Surge XT", sr).unwrap();
+    assert!(mixer.process(vec![synth], 0, vec![0.0; 1024]).is_err());
     mixer.reset();
   }
 }

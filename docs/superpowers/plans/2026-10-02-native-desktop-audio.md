@@ -94,3 +94,20 @@ WebKitGTK (the desktop webview) cannot play to a second output device (no `setSi
   another plugin replaces the instance (the new one loads first, so a failed swap keeps the old).
   Checked by a Rust test and the new PLUG-2 cell ("Plugin mixing", desktop), which also tracks
   effect plugins and VST3 (still to do, so PLUG-2 fails for now).
+- Done 2026-10-03: effect plugins on orbits and the master. `.clapfx(plugin, { id, state })` puts a
+  CLAP audio effect after an orbit's own effects (repeat it for a chain); `masterfx(plugin)` puts one
+  on the whole mix. superdough has an insert seam (setInsertProvider, like the cue provider): an
+  insert takes the orbit's (or master's) audio and gives it back a fixed latency later, and
+  everything that plays on that orbit (voices, plugin notes, ducking, automation) is scheduled that
+  much early, so it is heard at its time. The desktop insert (packages/desktopbridge/fx.mjs) sends
+  512-frame chunks to Rust (`mix_process`, raw samples, chain and start frame in headers), which runs
+  the chain, and plays the result 2048 frames (~43-46 ms) after the input; a chunk that comes back
+  later than that plays dry and is counted (fxStats). The schedulers deliver haps 100-300 ms ahead,
+  so an orbit insert plus a master insert fit. Each effect on each orbit is its own instance (by id,
+  or "<plugin> (orbit <n>)"); `auto` reaches its parameters as `{ c: '<name>:<parameter>' }`.
+  Chains come from haps; after each evaluation (a new core hook, registerEvalHook) the pattern is
+  queried 4 cycles ahead and orbits it no longer sets chains on lose them, and masterfx calls of the
+  evaluation become the master chain. Exports with inserts render stems, run each orbit's stem
+  through its chain and the sum through the master's, in Rust with instances of their own.
+  Measured (desktop PLUG-2): notes after an insert within 0.05 ms of an orbit without one, master
+  exactly one insert latency (46.4 ms at 44.1 kHz) after the orbits, no late chunks.

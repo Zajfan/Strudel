@@ -29,8 +29,25 @@ import { logger } from './logger.mjs';
 import { connectLFO, connectEnvelope, connectBusModulator, connectAutomation } from './modulators.mjs';
 import { getSampleBufferSource, loadBuffer } from './sampler.mjs';
 import { getAudioContext } from './audioContext.mjs';
-import { CueOutput, SuperdoughAudioController, getCueOutputProvider, setCueOutputProvider } from './superdoughoutput.mjs';
-export { setCueOutputProvider, getCueOutputProvider };
+import {
+  CueOutput,
+  SuperdoughAudioController,
+  getCueOutputProvider,
+  setCueOutputProvider,
+  setInsertProvider,
+} from './superdoughoutput.mjs';
+export { setCueOutputProvider, getCueOutputProvider, setInsertProvider };
+
+// Sets the master's insert chain (see setInsertProvider); none (or an empty one): no insert.
+export function setMasterInserts(chain) {
+  getSuperdoughAudioController()?.setMasterInserts(chain);
+}
+
+// Sets every orbit's insert chain at once: `chains` maps orbit numbers to chains; orbits not in it
+// lose theirs. (For after an evaluation, from the chains the new code sets.)
+export function syncOrbitInserts(chains) {
+  getSuperdoughAudioController()?.syncOrbitInserts(chains);
+}
 import { resetSeenKeys } from './wavetable.mjs';
 
 export const DEFAULT_MAX_POLYPHONY = 128;
@@ -359,7 +376,8 @@ export function setSuperdoughAudioController(newController) {
 // External sources: continuous streams from outside superdough (e.g. CLAP plugins rendered by the
 // desktop backend) played through an orbit like superdough's own voices. A channel has an `input`
 // for the stream, then gain, pan and post-gain, and sends to its orbit's delay and reverb.
-// update(value, t, cps, duration) applies a hap's controls from time t: orbit and cue (routing), gain,
+// update(value, t, cps, duration) applies a hap's controls for the moment heard at t, and returns when
+// the stream must carry that moment (t, or earlier by the latency of the orbit's inserts): orbit and cue (routing), gain,
 // postgain, pan, delay/delaytime/delayfeedback and room/roomsize/roomfade/roomlp/roomdim; ducking
 // comes with the orbit. The filters (lpf, hpf, bpf with their q and envelopes: lpenv, lpattack, ...) are
 // the stream's: each hap sets them (or leaves them off) from its time on, like a mono synth's filter,
@@ -422,6 +440,11 @@ export function getExternalChannel(key) {
         orbitBus.connectToOutput(post);
         routeKey = nextRoute;
       }
+      if (!cue) {
+        if (value.inserts !== undefined) controller.setOrbitInserts(orbit, value.inserts);
+        controller.notifyInserts(orbit, value, t, duration);
+        t -= controller.latency(orbit);
+      }
       input.gain.setValueAtTime(applyGainCurve(v('gain', 1)), t);
       post.gain.setValueAtTime(applyGainCurve(v('postgain', 1)), t);
       panner.pan.setValueAtTime(2 * v('pan', 0.5) - 1, t);
@@ -463,6 +486,7 @@ export function getExternalChannel(key) {
         if (env < 0) [min, max] = [max, min];
         getParamADSR(filter.frequency, attack, decay, sustain, release, min, max, t, t + duration, 'exponential');
       }
+      return t;
     },
     disconnect() {
       input.disconnect();
@@ -716,7 +740,19 @@ export const superdough = async (value, t, hapDuration, cps = 0.5, cycle = 0.5) 
   }
   const orbitBus = audioController.getOrbit(orbit, channels, !!cue);
   if (duckorbit != null) {
+    // (at the time it is heard: each target orbit applies its own latency)
     audioController.duck(duckorbit, t, duckonset, duckattack, duckdepth);
+  }
+  if (!cue) {
+    // an orbit with an insert (an effect plugin, see setInsertProvider), or a master insert, is heard
+    // its latency later: its voices play that much early. (Haps without `inserts` leave the chain.)
+    if (value.inserts !== undefined) audioController.setOrbitInserts(orbit, value.inserts);
+    audioController.notifyInserts(orbit, value, t, hapDuration);
+    t -= audioController.latency(orbit);
+    if (t < ac.currentTime) {
+      console.warn(`[superdough]: too late for the insert's latency on orbit ${orbit}`);
+      return;
+    }
   }
 
   postgain = applyGainCurve(postgain);

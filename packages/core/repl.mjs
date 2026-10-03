@@ -13,6 +13,24 @@ import { evalScope } from './evaluate.mjs';
 import { register, Pattern, isPattern, silence, stack } from './pattern.mjs';
 import { reset_state } from './impure.mjs';
 
+// Hooks for packages that keep state per evaluation (such as the desktop app's effect plugins):
+// before() when an evaluation starts, after({ pattern, cycle, cps }) when it succeeded and `pattern`
+// plays from now (cycle: the scheduler's current cycle). Returns a function that removes the hook.
+const evalHooks = new Set();
+export function registerEvalHook(hook) {
+  evalHooks.add(hook);
+  return () => evalHooks.delete(hook);
+}
+const runEvalHooks = (phase, arg) => {
+  for (const hook of evalHooks) {
+    try {
+      hook[phase]?.(arg);
+    } catch (err) {
+      errorLogger(err);
+    }
+  }
+};
+
 export function repl({
   defaultOutput,
   onEvalError,
@@ -414,6 +432,7 @@ export function repl({
       await injectPatternMethods();
       setTime(() => scheduler.now()); // TODO: refactor?
       await beforeEval?.({ code, blockBased: false });
+      runEvalHooks('before');
       allTransforms = []; // reset all transforms
 
       codeBlocks = {};
@@ -442,6 +461,7 @@ export function repl({
       });
 
       afterEval?.({ code, pattern, meta, range: undefined, widgetRemoved: false });
+      runEvalHooks('after', { pattern, cycle: scheduler.now(), cps: scheduler.cps });
       return pattern;
     } catch (err) {
       logger(`[eval] error: ${err.message}`, 'error');
@@ -460,6 +480,7 @@ export function repl({
       await injectPatternMethods();
       setTime(() => scheduler.now()); // TODO: refactor?
       await beforeEval?.({ code, blockBased: true });
+      runEvalHooks('before');
       allTransforms = []; // reset all transforms
 
       const transpilerOptionsWithBlock = {
@@ -555,6 +576,7 @@ export function repl({
       });
 
       afterEval?.({ code, pattern, meta, range: options.range, widgetRemoved });
+      runEvalHooks('after', { pattern, cycle: scheduler.now(), cps: scheduler.cps });
       return pattern;
     } catch (err) {
       logger(`[eval] error: ${err.message}`, 'error');

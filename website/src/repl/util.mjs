@@ -96,6 +96,8 @@ export function loadModules() {
       import('@strudel/desktopbridge/cue.mjs'),
       // CLAP plugins, hosted by the native backend
       import('@strudel/desktopbridge/clap.mjs'),
+      // CLAP effects on orbits and the master
+      import('@strudel/desktopbridge/fx.mjs'),
     ]);
   } else {
     modules = modules.concat([import('@strudel/midi'), import('@strudel/osc')]);

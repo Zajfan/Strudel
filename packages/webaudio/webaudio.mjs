@@ -50,7 +50,9 @@ export async function renderPatternAudio(
   multiChannelOrbits,
   downloadName = undefined,
 ) {
-  const renderedBuffer = await renderOffline(pattern, cps, begin, end, sampleRate, maxPolyphony, multiChannelOrbits);
+  const renderedBuffer = collectInserts(pattern, cps, begin, end)
+    ? (await renderPatternStems(pattern, cps, begin, end, sampleRate, maxPolyphony)).mix
+    : await renderOffline(pattern, cps, begin, end, sampleRate, maxPolyphony, multiChannelOrbits);
   downloadBlob(new Blob([audioBufferToWav(renderedBuffer)], { type: 'audio/wav' }), `${downloadName || defaultName()}.wav`);
 }
 
@@ -103,6 +105,34 @@ async function renderOffline(pattern, cps, begin, end, sampleRate, maxPolyphony,
   }
 }
 
+// Inserts in renders: effects outside superdough on orbits or the master (superdough's insert
+// provider; the desktop app's effect plugins) can't run inside an offline render, so a render with
+// any is rendered as stems, which the insert renderer then processes:
+//   { masterChain(): chain, process({ stems, chains, master, haps, sampleRate }) -> { stems, mix } }
+// with chains: orbit -> its chain (from the first hap that sets it), haps: [{ value, t, duration }].
+let insertRenderer;
+export function registerInsertRenderer(renderer) {
+  insertRenderer = renderer;
+}
+
+// the render's inserts, or null if it has none
+function collectInserts(pattern, cps, begin, end) {
+  if (!insertRenderer) return null;
+  const chains = new Map();
+  const haps = [];
+  for (const hap of pattern.queryArc(begin, end, { _cps: cps })) {
+    if (!hap.hasOnset()) continue;
+    const value = hap2value(hap);
+    if (value.cue) continue;
+    haps.push({ value, t: (hap.whole.begin.valueOf() - begin) / cps, duration: hap.duration / cps });
+    const orbit = Math.max(1, Number(value.orbit ?? 1));
+    if (value.inserts !== undefined && !chains.has(orbit)) chains.set(orbit, value.inserts);
+  }
+  const master = insertRenderer.masterChain() ?? [];
+  const any = master.length > 0 || [...chains.values()].some((chain) => chain?.length);
+  return any ? { chains, master, haps } : null;
+}
+
 // an OfflineAudioContext has at most 32 channels: 16 stereo orbits
 const MAX_STEM_ORBITS = 16;
 
@@ -149,6 +179,10 @@ export async function renderPatternStems(pattern, cps, begin, end, sampleRate, m
       }
     }
     stems.set(orbit, stem);
+  }
+  const inserts = collectInserts(pattern, cps, begin, end);
+  if (inserts) {
+    return insertRenderer.process({ stems, ...inserts, sampleRate: rendered.sampleRate });
   }
   return { mix, stems };
 }

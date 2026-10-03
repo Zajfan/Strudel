@@ -141,6 +141,40 @@ pub fn mix_set_state(plugin: usize, state: String, mixer: State<'_, MixerEngine>
   mixer.set_state(plugin, &state)
 }
 
+// ------------------------------------------------------------------ effect plugins in the mixer
+
+// An effect plugin as the live instance `instance` (default: the plugin's name) for the page's rate.
+#[tauri::command]
+pub fn mix_load_fx(plugin: String, sample_rate: f64, instance: Option<String>, mixer: State<'_, MixerEngine>) -> Result<usize, String> {
+  mixer.load_effect_as(instance.as_deref().unwrap_or(&plugin), &plugin, sample_rate)
+}
+
+// a separate instance of an effect, for an export; unloaded with mix_unload
+#[tauri::command]
+pub fn mix_load_fx_instance(plugin: String, sample_rate: f64, instance: Option<String>, mixer: State<'_, MixerEngine>) -> Result<usize, String> {
+  mixer.load_effect_instance_of(instance.as_deref().unwrap_or(&plugin), &plugin, sample_rate)
+}
+
+// Runs audio through a chain of effects. The body is raw interleaved stereo little-endian f32;
+// headers: x-chain (effect indices, comma-separated, in order) and x-start (the first frame, on the
+// page's audio clock, for the effects' parameter changes). Returns the processed audio, same layout.
+#[tauri::command]
+pub fn mix_process(request: Request<'_>, mixer: State<'_, MixerEngine>) -> Result<Response, String> {
+  let header = |name: &str| request.headers().get(name).and_then(|v| v.to_str().ok()).map(|v| v.to_string());
+  let chain: Vec<usize> = header("x-chain")
+    .ok_or("mix_process: no x-chain header")?
+    .split(',')
+    .filter(|s| !s.is_empty())
+    .map(|s| s.trim().parse::<usize>().map_err(|e| e.to_string()))
+    .collect::<Result<_, _>>()?;
+  let start: i64 = header("x-start").ok_or("mix_process: no x-start header")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
+  let InvokeBody::Raw(bytes) = request.body() else {
+    return Err("mix_process expects raw f32 samples".to_string());
+  };
+  let input: Vec<f32> = bytes.chunks_exact(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect();
+  Ok(Response::new(mixer.process(chain, start, input)?))
+}
+
 // a separate instance of a plugin, for an export (offline render); unloaded with mix_unload
 #[tauri::command]
 pub fn mix_load_instance(plugin: String, sample_rate: f64, instance: Option<String>, mixer: State<'_, MixerEngine>) -> Result<usize, String> {

@@ -201,6 +201,8 @@ pub(crate) struct Layout {
   inputs: Vec<usize>,
   outputs: Vec<usize>,
   main_output: usize,
+  // an effect's input for the audio it processes
+  main_input: Option<usize>,
   note_port: u16,
   use_midi: bool,
   pub(crate) params: Vec<ParamDesc>,
@@ -217,14 +219,14 @@ fn scan_audio_ports(ext: &PluginAudioPorts, handle: &mut PluginMainThreadHandle,
   ports
 }
 
-fn layout(instance: &mut PluginInstance<Host>) -> Result<Layout, String> {
+fn layout(instance: &mut PluginInstance<Host>, effect: bool) -> Result<Layout, String> {
   // both extensions first: the handle borrows the instance
   let audio_ports = instance.access_shared_handler(|s| s.audio_ports.get().copied().flatten());
   let note_ports = instance.access_shared_handler(|s| s.note_ports.get().copied().flatten());
   let mut handle = instance.plugin_handle();
-  let (inputs, outputs, main_output) = match audio_ports {
+  let (inputs, outputs, main_output, main_input) = match audio_ports {
     // without the extension, CLAP's default is one stereo output
-    None => (vec![], vec![2], 0),
+    None => (vec![], vec![2], 0, None),
     Some(ext) => {
       let inputs = scan_audio_ports(&ext, &mut handle, true);
       let outputs = scan_audio_ports(&ext, &mut handle, false);
@@ -232,13 +234,21 @@ fn layout(instance: &mut PluginInstance<Host>) -> Result<Layout, String> {
         return Err("the plugin has no audio output".to_string());
       }
       let main_output = outputs.iter().position(|&(_, main)| main).unwrap_or(0);
-      (inputs.into_iter().map(|(c, _)| c).collect(), outputs.into_iter().map(|(c, _)| c).collect(), main_output)
+      let main_input = if inputs.is_empty() { None } else { Some(inputs.iter().position(|&(_, main)| main).unwrap_or(0)) };
+      (inputs.into_iter().map(|(c, _)| c).collect(), outputs.into_iter().map(|(c, _)| c).collect(), main_output, main_input)
     }
   };
+  if effect && main_input.is_none() {
+    return Err("the plugin has no audio input".to_string());
+  }
   let (note_port, use_midi) = match note_ports {
     None => (0, false),
     Some(ext) => {
       if ext.count(&mut handle, true) == 0 {
+        // an effect needs no notes
+        if effect {
+          return Ok(Layout { inputs, outputs, main_output, main_input, note_port: 0, use_midi: false, params: params(instance) });
+        }
         return Err("the plugin has no note input".to_string());
       }
       let mut buf = NotePortInfoBuffer::new();
@@ -254,7 +264,7 @@ fn layout(instance: &mut PluginInstance<Host>) -> Result<Layout, String> {
     }
   };
   let params = params(instance);
-  Ok(Layout { inputs, outputs, main_output, note_port, use_midi, params })
+  Ok(Layout { inputs, outputs, main_output, main_input, note_port, use_midi, params })
 }
 
 // Where plugins are looked for: CLAP_PATH, then the standard per-user and system folders.
@@ -350,7 +360,7 @@ fn close_gui(instance: &mut PluginInstance<Host>, open: OpenGui) {
 // GUIs, and deactivates and unloads them when the audio side hands their processors back.
 
 enum MainCommand {
-  Load { path: PathBuf, index: usize, sample_rate: f64, reply: Sender<Result<Loaded, String>> },
+  Load { path: PathBuf, index: usize, sample_rate: f64, effect: bool, reply: Sender<Result<Loaded, String>> },
   Gui { id: u64, title: String, show: bool, reply: Sender<Result<(), String>> },
   // saves the plugin's state (load: None) or loads one, replying with the saved bytes (or none)
   State { id: u64, load: Option<Vec<u8>>, reply: Sender<Result<Vec<u8>, String>> },
@@ -387,20 +397,21 @@ fn main_thread() -> Sender<MainCommand> {
     .clone()
 }
 
-fn instantiate(path: &PathBuf, index: usize, sample_rate: f64, id: u64) -> Result<(Hosted, Loaded), String> {
+fn instantiate(path: &PathBuf, index: usize, sample_rate: f64, effect: bool, id: u64) -> Result<(Hosted, Loaded), String> {
   let host_info = HostInfo::new("Strudel", "Strudel", "https://strudel.cc", "0.1.0").map_err(|e| e.to_string())?;
   let path = std::fs::canonicalize(path).map_err(|e| e.to_string())?;
   // SAFETY: loading a plugin runs its native initialisation code, which is what hosting means
   let entry = unsafe { PluginEntry::load(&*path.to_string_lossy()) }.map_err(|e| format!("cannot load {}: {}", path.display(), e))?;
   let factory = entry.get_plugin_factory().ok_or("the bundle has no plugin factory")?;
+  let feature: &[u8] = if effect { b"audio-effect" } else { b"instrument" };
   let plugin_id: CString = factory
     .plugin_descriptors()
-    .find(|d| d.features().any(|f| f.to_bytes() == b"instrument"))
+    .find(|d| d.features().any(|f| f.to_bytes() == feature))
     .and_then(|d| d.id().map(|id| id.to_owned()))
-    .ok_or("the bundle has no instrument")?;
+    .ok_or(if effect { "the bundle has no audio effect" } else { "the bundle has no instrument" })?;
   let mut instance =
     PluginInstance::<Host>::new(|_| Shared::default(), |_| HostMain::default(), &entry, &plugin_id, &host_info).map_err(|e| e.to_string())?;
-  let layout = layout(&mut instance)?;
+  let layout = layout(&mut instance, effect)?;
   let config = PluginAudioConfiguration { sample_rate, min_frames_count: 1, max_frames_count: BLOCK as u32 };
   let processor = instance.activate(|_, _| (), config).map_err(|e| e.to_string())?;
   let (retire, retired) = channel();
@@ -475,10 +486,10 @@ fn main_loop(commands: Receiver<MainCommand>) {
 
 fn handle(command: MainCommand, plugins: &mut Vec<Hosted>, next_id: &mut u64) {
   match command {
-    MainCommand::Load { path, index, sample_rate, reply } => {
+    MainCommand::Load { path, index, sample_rate, effect, reply } => {
       let id = *next_id;
       *next_id += 1;
-      let _ = reply.send(instantiate(&path, index, sample_rate, id).map(|(hosted, loaded)| {
+      let _ = reply.send(instantiate(&path, index, sample_rate, effect, id).map(|(hosted, loaded)| {
         plugins.push(hosted);
         loaded
       }));
@@ -605,9 +616,14 @@ fn service(plugins: &mut [Hosted], max_wait: Duration) {
 // Loads a plugin on the plugins' main thread; returns its activated processor (for an engine's
 // audio thread), a signal for when it is unloaded, and its id for host_gui.
 pub(crate) fn load_plugin(name: &str, index: usize, sample_rate: f64) -> Result<Loaded, String> {
+  load_plugin_kind(name, index, sample_rate, false)
+}
+
+// an instrument, or with `effect` an audio effect (the bundle's first plugin of that kind)
+pub(crate) fn load_plugin_kind(name: &str, index: usize, sample_rate: f64, effect: bool) -> Result<Loaded, String> {
   let path = find_plugin(name)?;
   let (reply, answer) = channel();
-  main_thread().send(MainCommand::Load { path, index, sample_rate, reply }).map_err(|e| e.to_string())?;
+  main_thread().send(MainCommand::Load { path, index, sample_rate, effect, reply }).map_err(|e| e.to_string())?;
   answer.recv().map_err(|e| e.to_string())?
 }
 
@@ -710,6 +726,21 @@ impl Slot {
     let _ = self.retire.send(self.processor.stop_processing());
   }
 
+  // An effect: processes n frames of interleaved stereo `input` with the given parameter changes,
+  // adding the result into out (interleaved).
+  pub(crate) fn process_with_params(&mut self, input: &[f32], out: &mut [f32], n: usize, params: &[(u32, u32, f64)]) {
+    if let Some(port) = self.layout.main_input {
+      let chans = &mut self.in_bufs[port];
+      let count = chans.len();
+      for (c, ch) in chans.iter_mut().enumerate() {
+        for i in 0..n {
+          ch[i] = if count == 1 { 0.5 * (input[i * CHANNELS] + input[i * CHANNELS + 1]) } else { input[i * CHANNELS + c.min(CHANNELS - 1)] };
+        }
+      }
+    }
+    self.render_with_params(out, n, &[], params);
+  }
+
   // Renders n frames with the given (offset, event) notes and (offset, param id, plain value)
   // parameter changes, both in time order, and adds them into out (interleaved).
   pub(crate) fn render_with_params(&mut self, out: &mut [f32], n: usize, notes: &[(u32, NoteEvent)], params: &[(u32, u32, f64)]) {
@@ -752,7 +783,7 @@ impl Slot {
     let inputs = self.in_ports.with_input_buffers(
       self.in_bufs.iter_mut().map(|chans| AudioPortBuffer {
         latency: 0,
-        channels: AudioPortBufferType::f32_input_only(chans.iter_mut().map(|b| InputChannel::constant(&mut b[..n]))),
+        channels: AudioPortBufferType::f32_input_only(chans.iter_mut().map(|b| InputChannel::variable(&mut b[..n]))),
       })
     );
     let mut outputs = self.out_ports.with_output_buffers(
