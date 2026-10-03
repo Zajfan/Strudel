@@ -35,6 +35,8 @@ fn main() {
     .manage(audio::cue::CueState::default())
     .manage(audio::plugins::PluginEngine::default())
     .manage(audio::mixer::MixerEngine::default())
+    // effect plugins' audio, from a Web Worker (which can't use invoke): see audio::fx_protocol
+    .register_asynchronous_uri_scheme_protocol("strudelfx", audio::fx_protocol)
     .invoke_handler(
       tauri::generate_handler![
         midibridge::sendmidi,

@@ -119,8 +119,7 @@ pub fn clap_state(plugin: String, engine: State<'_, PluginEngine>, mixer: State<
   if let Some(index) = mixer.index_of(&plugin) {
     return mixer.state(index);
   }
-  let id = engine.host_id(&plugin).ok_or_else(|| format!("\"{}\" is not loaded", plugin))?;
-  plugins::save_state(id)
+  engine.state(&plugin).unwrap_or_else(|| Err(format!("\"{}\" is not loaded", plugin)))
 }
 
 #[tauri::command]
@@ -130,8 +129,8 @@ pub fn clap_set_state(plugin: String, state: String, engine: State<'_, PluginEng
     mixer.set_state(index, &state)?;
     found = true;
   }
-  if let Some(id) = engine.host_id(&plugin) {
-    plugins::load_state(id, &state)?;
+  if let Some(result) = engine.set_state(&plugin, &state) {
+    result?;
     found = true;
   }
   if found { Ok(()) } else { Err(format!("\"{}\" is not loaded", plugin)) }
@@ -231,4 +230,62 @@ pub fn clap_param_list(plugin: String, engine: State<'_, PluginEngine>, mixer: S
 #[tauri::command]
 pub fn clap_params(plugin: String, params: Vec<ParamFromJs>, engine: State<'_, PluginEngine>) -> Result<(), String> {
   engine.params(&plugin, params)
+}
+
+// ------------------------------------------------------------------ effect audio from a worker
+
+// The `strudelfx` URI scheme: effect inserts stream audio from a Web Worker, off the page's main
+// thread (whose stalls would make chunks late), and a worker can't use invoke. POST
+// strudelfx://localhost/process?chain=<indices>&start=<frame> with raw interleaved stereo f32 as the
+// body runs it through the chain, as mix_process does. (Only the app's own webview reaches it.)
+pub fn fx_protocol<R: tauri::Runtime>(
+  ctx: tauri::UriSchemeContext<'_, R>,
+  request: tauri::http::Request<Vec<u8>>,
+  responder: tauri::UriSchemeResponder,
+) {
+  use tauri::Manager;
+  // one long-lived thread answers them all, in order (a thread per chunk would cost more than the work)
+  static IO: std::sync::OnceLock<std::sync::Mutex<std::sync::mpsc::Sender<(tauri::http::Request<Vec<u8>>, tauri::UriSchemeResponder)>>> =
+    std::sync::OnceLock::new();
+  let app = ctx.app_handle().clone();
+  let sender = IO
+    .get_or_init(|| {
+      let (sender, requests) = std::sync::mpsc::channel::<(tauri::http::Request<Vec<u8>>, tauri::UriSchemeResponder)>();
+      std::thread::Builder::new()
+        .name("strudel-fx-io".to_string())
+        .spawn(move || {
+          for (request, responder) in requests {
+            let result = fx_process(&app.state::<MixerEngine>(), &request);
+            let response = match result {
+              Ok(bytes) => tauri::http::Response::builder().status(200).header("Content-Type", "application/octet-stream").header("Access-Control-Allow-Origin", "*").body(bytes),
+              Err(err) => tauri::http::Response::builder().status(400).header("Content-Type", "text/plain").header("Access-Control-Allow-Origin", "*").body(err.into_bytes()),
+            };
+            responder.respond(response.unwrap());
+          }
+        })
+        .unwrap();
+      std::sync::Mutex::new(sender)
+    })
+    .lock()
+    .unwrap()
+    .clone();
+  let _ = sender.send((request, responder));
+}
+
+fn fx_process(mixer: &MixerEngine, request: &tauri::http::Request<Vec<u8>>) -> Result<Vec<u8>, String> {
+  let query = request.uri().query().unwrap_or("");
+  let mut chain = None;
+  let mut start = None;
+  for pair in query.split('&') {
+    match pair.split_once('=') {
+      Some(("chain", v)) => {
+        chain = Some(v.split(',').filter(|s| !s.is_empty()).map(|s| s.parse::<usize>().map_err(|e| e.to_string())).collect::<Result<Vec<_>, _>>()?)
+      }
+      Some(("start", v)) => start = Some(v.parse::<i64>().map_err(|e| e.to_string())?),
+      _ => {}
+    }
+  }
+  let (chain, start) = (chain.ok_or("no chain")?, start.ok_or("no start")?);
+  let input: Vec<f32> = request.body().chunks_exact(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect();
+  mixer.process(chain, start, input)
 }

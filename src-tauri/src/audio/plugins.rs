@@ -313,7 +313,30 @@ pub(crate) struct NewSlot {
 // what the audio thread is asked to do with its plugins
 enum AudioCommand {
   Add(NewSlot),
+  AddVst3(usize, super::vst3::Vst3Slot),
   Remove(usize),
+}
+
+// a plugin on the native output: CLAP (rendered in the callback) or VST3 (rendered on the VST3
+// thread, which the callback waits for only so long)
+enum NativeSlot {
+  Clap(Slot),
+  Vst3(usize, super::vst3::Vst3Slot),
+}
+
+impl NativeSlot {
+  fn index(&self) -> usize {
+    match self {
+      NativeSlot::Clap(slot) => slot.index,
+      NativeSlot::Vst3(index, _) => *index,
+    }
+  }
+  fn retire(self) {
+    match self {
+      NativeSlot::Clap(slot) => slot.retire(),
+      NativeSlot::Vst3(_, slot) => super::vst3::unload(slot.id),
+    }
+  }
 }
 
 // The plugin's GUI, while open: in a window of ours (embedded), or the plugin's own (floating).
@@ -836,6 +859,8 @@ struct Stats {
   late_notes: AtomicU64,
   param_changes: AtomicU64,
   plugins: AtomicU64,
+  // VST3 blocks that didn't come back within the callback's budget (played as silence)
+  late_blocks: AtomicU64,
 }
 
 #[derive(Serialize)]
@@ -849,6 +874,7 @@ pub struct EngineStats {
   notes: u64,
   late_notes: u64,
   param_changes: u64,
+  late_blocks: u64,
 }
 
 struct Running {
@@ -870,6 +896,8 @@ struct Running {
   // each index is
   plugins: HashMap<String, usize>,
   names: HashMap<usize, String>,
+  // the VST3 plugins' ids on the VST3 thread (the others are CLAP, see host_ids)
+  vst3_ids: HashMap<usize, u64>,
   next_index: usize,
 }
 
@@ -945,7 +973,7 @@ impl PluginEngine {
           buffer_size: cpal::BufferSize::Default,
         };
         let sr = sample_rate as f64;
-        let mut slots: Vec<Slot> = Vec::new();
+        let mut slots: Vec<NativeSlot> = Vec::new();
         let mut pending: Vec<NoteEvent> = Vec::new();
         let mut pending_params: Vec<ParamEvent> = Vec::new();
         let mut block_params: Vec<(u32, u32, f64)> = Vec::with_capacity(256);
@@ -959,11 +987,12 @@ impl PluginEngine {
                 match command {
                   AudioCommand::Add(new) => {
                     if let Ok(slot) = Slot::new(new) {
-                      slots.push(slot);
+                      slots.push(NativeSlot::Clap(slot));
                     }
                   }
+                  AudioCommand::AddVst3(index, slot) => slots.push(NativeSlot::Vst3(index, slot)),
                   AudioCommand::Remove(index) => {
-                    if let Some(i) = slots.iter().position(|s| s.index == index) {
+                    if let Some(i) = slots.iter().position(|s| s.index() == index) {
                       slots.remove(i).retire();
                     }
                     pending.retain(|ev| ev.plugin != index);
@@ -986,9 +1015,10 @@ impl PluginEngine {
                 let start = block_start + Duration::from_secs_f64(done as f64 / sr);
                 let end = start + Duration::from_secs_f64(n as f64 / sr);
                 for slot in slots.iter_mut() {
+                  let slot_index = slot.index();
                   block_notes.clear();
                   pending.retain(|ev| {
-                    if ev.plugin != slot.index || ev.due >= end {
+                    if ev.plugin != slot_index || ev.due >= end {
                       return true;
                     }
                     let offset = if ev.due <= start {
@@ -1007,7 +1037,7 @@ impl PluginEngine {
                   t_stats.notes.fetch_add(block_notes.iter().filter(|(_, e)| e.on).count() as u64, Ordering::Relaxed);
                   block_params.clear();
                   pending_params.retain(|ev| {
-                    if ev.plugin != slot.index || ev.due >= end {
+                    if ev.plugin != slot_index || ev.due >= end {
                       return true;
                     }
                     let offset = if ev.due <= start { 0 } else { ((ev.due - start).as_secs_f64() * sr) as u32 };
@@ -1016,7 +1046,18 @@ impl PluginEngine {
                   });
                   block_params.sort_by_key(|(o, _, _)| *o);
                   t_stats.param_changes.fetch_add(block_params.len() as u64, Ordering::Relaxed);
-                  slot.render_with_params(&mut out[done * CHANNELS..(done + n) * CHANNELS], n, &block_notes, &block_params);
+                  let part = &mut out[done * CHANNELS..(done + n) * CHANNELS];
+                  match slot {
+                    NativeSlot::Clap(slot) => slot.render_with_params(part, n, &block_notes, &block_params),
+                    NativeSlot::Vst3(_, slot) => {
+                      let notes = block_notes.iter().map(|(o, e)| (*o, e.key, e.velocity, e.on)).collect();
+                      // a quarter of the block's duration at most: the device can't wait
+                      let budget = Duration::from_secs_f64(n as f64 / sr / 4.0);
+                      if !slot.render_within(part, n, notes, &block_params, budget) {
+                        t_stats.late_blocks.fetch_add(1, Ordering::Relaxed);
+                      }
+                    }
+                  }
                 }
                 done += n;
               }
@@ -1066,6 +1107,7 @@ impl PluginEngine {
       capturing,
       plugins: HashMap::new(),
       names: HashMap::new(),
+      vst3_ids: HashMap::new(),
       next_index: 0,
     });
     Ok(())
@@ -1102,6 +1144,7 @@ impl PluginEngine {
       running.commands.push(AudioCommand::Remove(index)).map_err(|_| "the audio thread is busy".to_string())?;
       running.host_ids.remove(&index);
       running.names.remove(&index);
+      running.vst3_ids.remove(&index);
       running.unloaded.remove(&index)
     };
     if let Some(unloaded) = unloaded {
@@ -1117,8 +1160,35 @@ impl PluginEngine {
     running.host_ids.get(running.plugins.get(plugin)?).copied()
   }
 
+  fn vst3_id(&self, plugin: &str) -> Option<u64> {
+    let guard = self.running.lock().unwrap();
+    let running = guard.as_ref()?;
+    running.vst3_ids.get(running.plugins.get(plugin)?).copied()
+  }
+
+  // A loaded plugin's state as text (None: not loaded here), and loading one.
+  pub fn state(&self, plugin: &str) -> Option<Result<String, String>> {
+    if let Some(id) = self.vst3_id(plugin) {
+      return Some(super::vst3::save_state_text(id));
+    }
+    self.host_id(plugin).map(save_state)
+  }
+
+  pub fn set_state(&self, plugin: &str, state: &str) -> Option<Result<(), String>> {
+    if let Some(id) = self.vst3_id(plugin) {
+      return Some(super::vst3::load_state_text(id, state));
+    }
+    self.host_id(plugin).map(|id| load_state(id, state))
+  }
+
   // Shows or hides a loaded plugin's GUI; Ok(false) if it isn't loaded here.
   pub fn gui(&self, plugin: &str, show: bool) -> Result<bool, String> {
+    let which = self.plugin_of(plugin).unwrap_or_default();
+    let title = gui_title(plugin, which.strip_prefix("vst3:").or(which.strip_prefix("clap:")).unwrap_or(&which));
+    if let Some(id) = self.vst3_id(plugin) {
+      super::vst3::gui(id, &title, show)?;
+      return Ok(true);
+    }
     let id = {
       let guard = self.running.lock().unwrap();
       let Some(running) = guard.as_ref() else {
@@ -1129,7 +1199,7 @@ impl PluginEngine {
       };
       *running.host_ids.get(index).ok_or("no id for this plugin")?
     };
-    host_gui(id, &gui_title(plugin, &self.plugin_of(plugin).unwrap_or_default()), show)?;
+    host_gui(id, &title, show)?;
     Ok(true)
   }
 
@@ -1141,7 +1211,7 @@ impl PluginEngine {
       .into_iter()
       .filter_map(|name| {
         let plugin = self.plugin_of(&name)?;
-        let state = self.host_id(&name).and_then(|id| save_state(id).ok());
+        let state = self.state(&name).and_then(|s| s.ok());
         Some((name, plugin, state))
       })
       .collect();
@@ -1149,8 +1219,8 @@ impl PluginEngine {
     self.start(device)?;
     for (name, plugin, state) in plugins {
       self.load_as(&name, &plugin)?;
-      if let (Some(state), Some(id)) = (state, self.host_id(&name)) {
-        load_state(id, &state)?;
+      if let Some(state) = state {
+        self.set_state(&name, &state).transpose()?;
       }
     }
     Ok(())
@@ -1164,6 +1234,7 @@ impl PluginEngine {
   }
 
   // Loads a plugin (once) under its own name and returns its index.
+  #[cfg(test)]
   pub fn load(&self, plugin: &str) -> Result<usize, String> {
     self.load_as(plugin, plugin)
   }
@@ -1171,16 +1242,19 @@ impl PluginEngine {
   // Loads a plugin as the instance `name` (once) and returns its index. An instance of another plugin
   // by that name is replaced.
   pub fn load_as(&self, name: &str, plugin: &str) -> Result<usize, String> {
-    if plugin.starts_with("vst3:") || (find_plugin(plugin).is_err() && super::vst3::find_vst3(plugin).is_some()) {
-      return Err(format!("\"{}\" is a VST3 plugin: those play in Strudel's mixer (the default output), not on the native output yet", plugin));
-    }
-    let plugin = plugin.strip_prefix("clap:").unwrap_or(plugin);
+    let vst3_path = match plugin.strip_prefix("vst3:") {
+      Some(bare) => Some(super::vst3::find_vst3(bare).ok_or_else(|| format!("no VST3 plugin \"{}\"", bare))?),
+      None if find_plugin(plugin.strip_prefix("clap:").unwrap_or(plugin)).is_err() => super::vst3::find_vst3(plugin),
+      None => None,
+    };
     if self.running.lock().unwrap().is_none() {
       self.start(None)?;
     }
     if self.plugin_of(name).map_or(false, |p| p != plugin) {
       // a swap: only once the new plugin is found
-      find_plugin(plugin)?;
+      if vst3_path.is_none() {
+        find_plugin(plugin.strip_prefix("clap:").unwrap_or(plugin))?;
+      }
       self.unload(name)?;
     }
     let mut guard = self.running.lock().unwrap();
@@ -1190,7 +1264,16 @@ impl PluginEngine {
     }
     let index = running.next_index;
     running.next_index += 1;
-    let Loaded { slot, unloaded, id } = load_plugin(plugin, index, running.sample_rate as f64)?;
+    if let Some(path) = vst3_path {
+      let (slot, params) = super::vst3::load(path, running.sample_rate as f64, false)?;
+      running.params.insert(index, params);
+      running.vst3_ids.insert(index, slot.id);
+      running.commands.push(AudioCommand::AddVst3(index, slot)).map_err(|_| "the audio thread is busy".to_string())?;
+      running.plugins.insert(name.to_string(), index);
+      running.names.insert(index, plugin.to_string());
+      return Ok(index);
+    }
+    let Loaded { slot, unloaded, id } = load_plugin(plugin.strip_prefix("clap:").unwrap_or(plugin), index, running.sample_rate as f64)?;
     running.params.insert(index, slot.layout.params.clone());
     running.host_ids.insert(index, id);
     running.unloaded.insert(index, unloaded);
@@ -1221,6 +1304,7 @@ impl PluginEngine {
     Ok(())
   }
 
+  #[cfg(test)]
   pub fn play(&self, plugin: &str, notes: Vec<NoteFromJs>) -> Result<(), String> {
     self.play_as(plugin, plugin, notes)
   }
@@ -1246,7 +1330,7 @@ impl PluginEngine {
   pub fn stats(&self) -> EngineStats {
     let guard = self.running.lock().unwrap();
     match guard.as_ref() {
-      None => EngineStats { running: false, device: None, sample_rate: 0, plugins: vec![], frames: 0, notes: 0, late_notes: 0, param_changes: 0 },
+      None => EngineStats { running: false, device: None, sample_rate: 0, plugins: vec![], frames: 0, notes: 0, late_notes: 0, param_changes: 0, late_blocks: 0 },
       Some(r) => {
         let mut plugins: Vec<(&String, &usize)> = r.plugins.iter().collect();
         plugins.sort_by_key(|(_, i)| **i);
@@ -1259,6 +1343,7 @@ impl PluginEngine {
           notes: r.stats.notes.load(Ordering::Relaxed),
           late_notes: r.stats.late_notes.load(Ordering::Relaxed),
           param_changes: r.stats.param_changes.load(Ordering::Relaxed),
+          late_blocks: r.stats.late_blocks.load(Ordering::Relaxed),
         }
       }
     }
@@ -1317,6 +1402,39 @@ mod tests {
     println!("stats: notes {} late {} frames {} plugins {:?}; captured {}", stats.notes, stats.late_notes, stats.frames, stats.plugins, captured.len());
     assert_eq!(stats.plugins, vec!["Surge XT".to_string()]);
     assert_eq!(stats.notes, 3);
+    let rms = (captured.iter().map(|s| s * s).sum::<f32>() / captured.len().max(1) as f32).sqrt();
+    assert!(rms > 0.001, "rms {}", rms);
+  }
+
+  #[test]
+  fn plays_a_vst3_plugin_on_the_native_output() {
+    if super::super::vst3::find_vst3("Surge XT").is_none() || !std::path::Path::new("/usr/share/alsa/alsa.conf").exists() {
+      println!("Surge XT VST3 or ALSA missing, skipping");
+      return;
+    }
+    crate::audio::cue::tests::silent_alsa_config();
+    let engine = PluginEngine::default();
+    engine.start(Some("strudel_null".to_string())).unwrap();
+    engine.capture(true);
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs_f64() * 1000.0;
+    let notes = [60u8, 64, 67]
+      .iter()
+      .enumerate()
+      .map(|(i, &key)| NoteFromJs { time: now + 800.0 + i as f64 * 200.0, duration: 150.0, key, velocity: 0.8 })
+      .collect();
+    engine.play_as("v", "vst3:Surge XT", notes).unwrap();
+    std::thread::sleep(Duration::from_millis(1800));
+    let stats = engine.stats();
+    let state = engine.state("v").unwrap().unwrap();
+    let captured: Vec<f32> = engine
+      .capture(false)
+      .chunks_exact(4)
+      .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+      .collect();
+    engine.stop();
+    println!("stats: notes {} late blocks {} frames {}; captured {}", stats.notes, stats.late_blocks, stats.frames, captured.len());
+    assert_eq!(stats.notes, 3);
+    assert!(state.starts_with("vst3:"));
     let rms = (captured.iter().map(|s| s * s).sum::<f32>() / captured.len().max(1) as f32).sqrt();
     assert!(rms > 0.001, "rms {}", rms);
   }

@@ -158,3 +158,11 @@ of installed:
     rpm2cpio surge-xt-x86_64-1.3.4.rpm | cpio -idm './usr/lib64/clap/*' './usr/lib64/vst3/*'
     cp 'usr/lib64/clap/Surge XT Effects.clap' ~/.clap/
     cp -r usr/lib64/vst3/*.vst3 ~/.vst3/
+
+## Browser MIX-1 live flake (2026-10-03)
+
+One run of browser MIX-1 failed "live ducking -14.92 dB < 6 dB": the probe found its three trigger
+points where the signal gets louder, not quieter (beforeRms 0.017, afterRms 0.096), so it measured at
+the wrong places. The next two runs passed (33.5 dB). Nothing in the browser path had changed (the
+work was desktop-only). The offline part of the same run was right (33.5 dB duck). Likely the live
+recording's alignment to the triggers; to look at with the long-session work.

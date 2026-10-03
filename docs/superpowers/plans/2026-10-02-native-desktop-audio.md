@@ -121,3 +121,22 @@ WebKitGTK (the desktop webview) cannot play to a second output device (no `setSi
   picks the VST3. VST3 parameters are normalized (0-1) for `auto`; states start with "vst3:".
   Checked by a Rust test and PLUG-2 (part 4): notes within 2 ms of a reference, editor drawn,
   effect tail in an export. PLUG-2 now passes.
+- Done 2026-10-03, the limits of the above:
+  - VST3 on the native output too. Its callback waits for a VST3 block a quarter of the block's
+    duration at most (the VST3 thread may be busy, e.g. loading); a block that comes later plays as
+    silence and is counted (engine_stats lateBlocks).
+  - VST3 parameters in the plugin's own units, like CLAP: stepped ones by step index, numeric ones
+    in the units the plugin displays (base units: Hz, s, dB, %; "kHz" and "ms" scaled), read from
+    the plugin's display at 0 and 1, with values found by bisection on the display (so curved scales
+    are right); other parameters stay 0-1. Surge XT's Global Volume: -48 to 0 dB.
+  - Effect inserts: 35 ms at 44.1 kHz instead of 46. The audio now goes from the insert's worklet
+    straight to a Web Worker (a MessageChannel), which sends it to Rust through a URI scheme of the
+    app's (`strudelfx://`, one I/O thread; workers can't use invoke), so the page's main thread is no
+    longer on the way: its stalls made chunks late. 128-frame chunks, 1536 frames of latency. The
+    measured round trips (chunk complete to processed chunk back in the worklet) are 640-900 frames,
+    up to 1408 in the first second of a new insert: smaller latencies (512, 1024) had late chunks.
+    A new chain is warmed up through the worker before it gets audio. fxStats reports late frames
+    and the slowest round trip per second.
+  - Exports follow chain changes during the song: each orbit's chain segments (from its haps, as
+    live) process their own stretch of the stem; an instance by name keeps its state across them.
+    `.clapfx(null)` sets no effects (live and in exports).

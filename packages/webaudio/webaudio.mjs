@@ -108,8 +108,9 @@ async function renderOffline(pattern, cps, begin, end, sampleRate, maxPolyphony,
 // Inserts in renders: effects outside superdough on orbits or the master (superdough's insert
 // provider; the desktop app's effect plugins) can't run inside an offline render, so a render with
 // any is rendered as stems, which the insert renderer then processes:
-//   { masterChain(): chain, process({ stems, chains, master, haps, sampleRate }) -> { stems, mix } }
-// with chains: orbit -> its chain (from the first hap that sets it), haps: [{ value, t, duration }].
+//   { masterChain(): chain, process({ stems, segments, master, haps, sampleRate }) -> { stems, mix } }
+// with segments: orbit -> [{ t, chain }] (seconds into the render; the chain its haps set from t on,
+// as live: a hap without `inserts` leaves it), haps: [{ value, t, duration }].
 let insertRenderer;
 export function registerInsertRenderer(renderer) {
   insertRenderer = renderer;
@@ -118,19 +119,27 @@ export function registerInsertRenderer(renderer) {
 // the render's inserts, or null if it has none
 function collectInserts(pattern, cps, begin, end) {
   if (!insertRenderer) return null;
-  const chains = new Map();
+  const segments = new Map();
   const haps = [];
-  for (const hap of pattern.queryArc(begin, end, { _cps: cps })) {
-    if (!hap.hasOnset()) continue;
+  const onsets = pattern
+    .queryArc(begin, end, { _cps: cps })
+    .filter((hap) => hap.hasOnset())
+    .sort((a, b) => a.whole.begin.valueOf() - b.whole.begin.valueOf());
+  for (const hap of onsets) {
     const value = hap2value(hap);
     if (value.cue) continue;
-    haps.push({ value, t: (hap.whole.begin.valueOf() - begin) / cps, duration: hap.duration / cps });
+    const t = (hap.whole.begin.valueOf() - begin) / cps;
+    haps.push({ value, t, duration: hap.duration / cps });
+    if (value.inserts === undefined) continue;
     const orbit = Math.max(1, Number(value.orbit ?? 1));
-    if (value.inserts !== undefined && !chains.has(orbit)) chains.set(orbit, value.inserts);
+    const list = segments.get(orbit) ?? [];
+    const key = JSON.stringify(value.inserts ?? []);
+    if (!list.length || JSON.stringify(list.at(-1).chain ?? []) !== key) list.push({ t, chain: value.inserts ?? [] });
+    segments.set(orbit, list);
   }
   const master = insertRenderer.masterChain() ?? [];
-  const any = master.length > 0 || [...chains.values()].some((chain) => chain?.length);
-  return any ? { chains, master, haps } : null;
+  const any = master.length > 0 || [...segments.values()].some((list) => list.some((s) => s.chain?.length));
+  return any ? { segments, master, haps } : null;
 }
 
 // an OfflineAudioContext has at most 32 channels: 16 stereo orbits

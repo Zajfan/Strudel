@@ -3,6 +3,9 @@
 // Tauri. An insert sends the orbit's audio to Rust in chunks, Rust runs it through the chain, and the
 // result plays LATENCY_FRAMES after the audio went in; superdough schedules everything on that orbit
 // that much early, so it is heard at its time (docs/superpowers/plans/2026-10-02-native-desktop-audio.md).
+// The audio goes from the insert's worklet straight to a Web Worker, which sends it to Rust through
+// the app's `strudelfx` URI scheme: the page's main thread, whose stalls would make chunks late, isn't
+// on the way.
 import { Pattern, logger, registerEvalHook } from '@strudel/core';
 import {
   getAudioContext,
@@ -14,10 +17,12 @@ import {
 import { Invoke } from './utils.mjs';
 import { paramChanges } from './clap.mjs';
 
-// frames per chunk sent to Rust (~11 ms at 48 kHz), and how long after going in the audio comes out:
-// the round trip to Rust has LATENCY_FRAMES - CHUNK_FRAMES (~32 ms at 48 kHz) to come back
-const CHUNK_FRAMES = 512;
-const LATENCY_FRAMES = 2048;
+// frames per chunk sent to Rust (one render quantum), and how long after going in the audio comes
+// out: the round trip to Rust (measured: under 1 ms) has LATENCY_FRAMES - CHUNK_FRAMES (8 ms at
+// 48 kHz) to come back
+const CHUNK_FRAMES = 128;
+const LATENCY_FRAMES = 1536;
+const WARMUP_CHUNKS = 64;
 
 const INSERT = `
 class StrudelFxInsert extends AudioWorkletProcessor {
@@ -31,17 +36,35 @@ class StrudelFxInsert extends AudioWorkletProcessor {
     this.frames = 0;
     this.lateFrames = 0;
     this.ticks = 0;
-    this.port.onmessage = ({ data }) => {
+    // the first frames (since the insert started) of the first late chunks
+    this.firstFrame = null;
+    this.lateAt = [];
+    // late chunks per second since the insert started
+    this.lateBySecond = [];
+    this.maxAge = [];
+    // the worker's port, once connected: chunks go there, processed chunks come back from it
+    this.fx = null;
+    const onChunk = ({ data }) => {
+      if (data.port) {
+        this.fx = data.port;
+        this.fx.onmessage = onChunk;
+        return;
+      }
       const chunk = this.chunks.get(data.start);
       if (!chunk) return;
       if (data.samples) {
         chunk.samples = data.samples;
         chunk.processed = true;
+        // how long the round trip took, in frames, from when the chunk was complete
+        const age = currentFrame - (data.start + ${CHUNK_FRAMES});
+        const second = Math.floor((data.start - this.firstFrame) / sampleRate);
+        this.maxAge[second] = Math.max(this.maxAge[second] ?? 0, age);
       } else {
         // no chain to run it through: the audio passes as it is
         chunk.passthrough = true;
       }
     };
+    this.port.onmessage = onChunk;
   }
   process(inputs, outputs) {
     const input = inputs[0];
@@ -51,6 +74,7 @@ class StrudelFxInsert extends AudioWorkletProcessor {
     const outR = outputs[0][1] ?? outL;
     const n = outL.length;
     const now = currentFrame;
+    this.firstFrame ??= now;
     for (let i = 0; i < n; i++) {
       if (this.fill === 0) this.chunkStart = now + i;
       this.chunk[this.fill * 2] = inL ? inL[i] : 0;
@@ -59,9 +83,10 @@ class StrudelFxInsert extends AudioWorkletProcessor {
         const samples = this.chunk;
         this.chunk = new Float32Array(${CHUNK_FRAMES} * 2);
         this.fill = 0;
-        // the dry audio stays here, in case the processed audio comes too late
-        this.chunks.set(this.chunkStart, { samples: samples.slice(), processed: false });
-        this.port.postMessage({ start: this.chunkStart, samples }, [samples.buffer]);
+        // the dry audio stays here, in case the processed audio comes too late; until the worker
+        // is connected (the first few quanta), it passes as it is
+        this.chunks.set(this.chunkStart, { samples: samples.slice(), processed: false, passthrough: !this.fx });
+        this.fx?.postMessage({ start: this.chunkStart, samples }, [samples.buffer]);
       }
     }
     // output frame f carries input frame f - LATENCY_FRAMES
@@ -73,7 +98,15 @@ class StrudelFxInsert extends AudioWorkletProcessor {
           outL[i] = chunk.samples[k];
           if (outR !== outL) outR[i] = chunk.samples[k + 1];
           this.frames++;
-          if (!chunk.processed && !chunk.passthrough) this.lateFrames++;
+          if (!chunk.processed && !chunk.passthrough) {
+            this.lateFrames++;
+            if (!chunk.late) {
+              chunk.late = true;
+              if (this.lateAt.length < 16) this.lateAt.push(start - this.firstFrame);
+              const second = Math.floor((start - this.firstFrame) / sampleRate);
+              this.lateBySecond[second] = (this.lateBySecond[second] ?? 0) + 1;
+            }
+          }
           break;
         }
       }
@@ -81,12 +114,102 @@ class StrudelFxInsert extends AudioWorkletProcessor {
     for (const start of this.chunks.keys()) {
       if (start + ${CHUNK_FRAMES} <= now + n - ${LATENCY_FRAMES}) this.chunks.delete(start);
     }
-    if (++this.ticks % 375 === 0) this.port.postMessage({ stats: { frames: this.frames, lateFrames: this.lateFrames } });
+    if (++this.ticks % 375 === 0) this.port.postMessage({ stats: { frames: this.frames, lateFrames: this.lateFrames, lateAt: this.lateAt, lateBySecond: [...this.lateBySecond].map((x) => x ?? 0), maxAgeFrames: [...this.maxAge].map((x) => x ?? 0) } });
     return true;
   }
 }
 registerProcessor('strudel-fx-insert', StrudelFxInsert);
 `;
+
+// The worker all inserts' audio goes through: per insert, the port of its worklet and the chain to
+// run (indices, comma-separated; none: pass the audio as it is). Chunks of one insert go to Rust one
+// after another, in order: an effect must see its audio in order.
+const FX_WORKER = `
+const inserts = new Map();
+const slowest = { second: null, ms: 0 };
+onmessage = ({ data }) => {
+  if (data.port) {
+    const insert = { chain: null, port: data.port, queue: Promise.resolve() };
+    inserts.set(data.id, insert);
+    data.port.onmessage = ({ data: { start, samples } }) => {
+      insert.queue = insert.queue.then(() => run(insert, start, samples));
+    };
+  } else if (data.warm) {
+    // rounds on silence through the path the audio takes, before it does
+    (async () => {
+      const silence = new Float32Array(${CHUNK_FRAMES} * 2);
+      for (let k = 0; k < data.rounds; k++) {
+        await fetch('strudelfx://localhost/process?chain=' + data.warm + '&start=0', { method: 'POST', body: silence.slice().buffer }).catch(() => {});
+      }
+      postMessage({ warmed: data.ticket });
+    })();
+  } else if (data.close) {
+    inserts.get(data.id)?.port.close();
+    inserts.delete(data.id);
+  } else {
+    const insert = inserts.get(data.id);
+    if (insert) insert.chain = data.chain;
+  }
+};
+async function run(insert, start, samples) {
+  if (!insert.chain) {
+    insert.port.postMessage({ start, samples: null });
+    return;
+  }
+  const t0 = performance.now();
+  try {
+    const response = await fetch('strudelfx://localhost/process?chain=' + insert.chain + '&start=' + start, { method: 'POST', body: samples.buffer });
+    if (!response.ok) throw new Error(await response.text());
+    const processed = new Float32Array(await response.arrayBuffer());
+    insert.port.postMessage({ start, samples: processed }, [processed.buffer]);
+    // the slowest round trip per second, for fxStats
+    const second = Math.floor(performance.now() / 1000);
+    const ms = performance.now() - t0;
+    if (second !== slowest.second) {
+      if (slowest.second != null) postMessage({ slowest: slowest.ms });
+      slowest.second = second;
+      slowest.ms = 0;
+    }
+    slowest.ms = Math.max(slowest.ms, ms);
+  } catch (err) {
+    insert.port.postMessage({ start, samples: null });
+    postMessage({ error: String(err) });
+  }
+}
+`;
+let fxWorker;
+const getFxWorker = () => {
+  if (!fxWorker) {
+    fxWorker = new Worker(URL.createObjectURL(new Blob([FX_WORKER], { type: 'application/javascript' })));
+    let reported = false;
+    fxWorker.onmessage = ({ data }) => {
+      if (data.warmed != null) {
+        warming.get(data.warmed)?.();
+        warming.delete(data.warmed);
+      }
+      if (data.slowest != null) {
+        roundTrips.push(+data.slowest.toFixed(1));
+        if (roundTrips.length > 120) roundTrips.shift();
+      }
+      if (data.error && !reported) {
+        reported = true;
+        logger(`[clapfx] ${data.error}`, 'error');
+      }
+    };
+  }
+  return fxWorker;
+};
+let nextInsertId = 0;
+const warming = new Map();
+let nextTicket = 0;
+const warmUp = (chain) =>
+  new Promise((resolve) => {
+    const ticket = nextTicket++;
+    warming.set(ticket, resolve);
+    getFxWorker().postMessage({ warm: chain, rounds: WARMUP_CHUNKS, ticket });
+  });
+// the slowest round trip to Rust in each of the last seconds (ms)
+const roundTrips = [];
 
 const modules = new WeakMap();
 const loadInsert = (audioContext) => {
@@ -115,6 +238,7 @@ function createInsert(audioContext, chain, { key }) {
   let closed = false;
   // the chain as loaded: [{ name, index, params }] (null while loading)
   let loaded = null;
+  const id = nextInsertId++;
   let loading = 0;
   // the state last loaded into each instance, by name
   const states = new Map();
@@ -133,14 +257,21 @@ function createInsert(audioContext, chain, { key }) {
         const params = new Map((await Invoke('mix_param_list', { plugin: index })).map((p) => [p.name.toLowerCase(), p]));
         effects.push({ name, index, params });
       }
-      if (run === loading) loaded = effects;
+      // a new chain's first rounds are slow (the plugins' first processing, the worker's first
+      // requests): warm it up on silence, through the worker, before it gets the orbit's audio
+      await warmUp(effects.map((e) => e.index).join(','));
+      if (run === loading) {
+        loaded = effects;
+        getFxWorker().postMessage({ id, chain: effects.map((e) => e.index).join(',') || null });
+      }
     } catch (err) {
       logger(`[clapfx] ${key}: ${err}`, 'error');
     }
   };
-  load(chain);
+  // the worklet takes over from the delay once the first chain is loaded and warm
+  const firstLoad = load(chain);
 
-  loadInsert(audioContext)
+  Promise.all([loadInsert(audioContext), firstLoad])
     .then(() => {
       if (closed) return;
       node = new AudioWorkletNode(audioContext, 'strudel-fx-insert', {
@@ -148,27 +279,14 @@ function createInsert(audioContext, chain, { key }) {
         numberOfOutputs: 1,
         outputChannelCount: [2],
       });
-      node.port.onmessage = async ({ data }) => {
-        if (data.stats) {
-          stats.set(key, data.stats);
-          return;
-        }
-        const { start, samples } = data;
-        if (!loaded?.length) {
-          node.port.postMessage({ start, samples: null });
-          return;
-        }
-        try {
-          const bytes = await Invoke('mix_process', new Uint8Array(samples.buffer), {
-            headers: { 'x-chain': loaded.map((e) => e.index).join(','), 'x-start': String(start) },
-          });
-          const processed = new Float32Array(bytes);
-          node.port.postMessage({ start, samples: processed }, [processed.buffer]);
-        } catch (err) {
-          node.port.postMessage({ start, samples: null });
-          logger(`[clapfx] ${key}: ${err}`, 'error');
-        }
+      node.port.onmessage = ({ data }) => {
+        if (data.stats) stats.set(key, data.stats);
       };
+      // the worklet talks to the worker directly
+      const channel = new MessageChannel();
+      node.port.postMessage({ port: channel.port1 }, [channel.port1]);
+      getFxWorker().postMessage({ id, port: channel.port2 }, [channel.port2]);
+      getFxWorker().postMessage({ id, chain: loaded?.map((e) => e.index).join(',') || null });
       input.disconnect(delay);
       delay.disconnect();
       input.connect(node).connect(output);
@@ -192,6 +310,7 @@ function createInsert(audioContext, chain, { key }) {
     },
     disconnect() {
       closed = true;
+      fxWorker?.postMessage({ id, close: true });
       loading++;
       input.disconnect();
       delay.disconnect();
@@ -206,7 +325,7 @@ setInsertProvider({ create: createInsert });
 
 // how many frames each insert has played, and how many of them came back too late from Rust (and
 // were played dry instead): { 'orbit 2': { frames, lateFrames } }
-export const fxStats = () => Object.fromEntries(stats);
+export const fxStats = () => ({ ...Object.fromEntries(stats), roundTripsMs: [...roundTrips] });
 
 const effectOf = (plugin, { id, state, format } = {}) => ({
   plugin: format ? `${format}:${plugin}` : plugin,
@@ -224,8 +343,10 @@ let pendingMasterChain = null;
  *   note("c3 e3").clap('Surge XT').orbit(2).clapfx('Surge XT Effects').clapfx('Compressor', { id: 'glue' })
  * Each effect on each orbit is its own instance, named by its id or else "<plugin> (orbit <n>)";
  * clapGui, clapState and clapParams take that name, and `auto` reaches its parameters as
- * `{ c: '<name>:<parameter>' }`. The orbit's audio is heard ~43 ms after it plays, and everything on
- * the orbit plays that much early, so it stays in time. Exports include the effects.
+ * `{ c: '<name>:<parameter>' }`. The orbit's audio is heard ~11 ms after it plays, and everything on
+ * the orbit plays that much early, so it stays in time. Haps without clapfx leave the orbit's
+ * effects as they are; clapfx(null) removes them (a section without). Exports include the effects,
+ * and their changes.
  * @name clapfx
  * @param {string} plugin the plugin's file name without .clap
  * @param {Object} [options]
@@ -234,6 +355,10 @@ let pendingMasterChain = null;
  * @param {string} [options.format] 'clap' or 'vst3', as for clap
  */
 Pattern.prototype.clapfx = function (plugin, options) {
+  // clapfx(null): no effects on the orbit (from these haps on)
+  if (plugin == null) {
+    return this.withValue((v) => ({ ...(typeof v === 'object' ? v : {}), inserts: [] }));
+  }
   const effect = effectOf(plugin, options);
   return this.withValue((v) => {
     const value = typeof v === 'object' ? v : {};
@@ -286,17 +411,23 @@ registerEvalHook({
 // instance of each effect of its own, from the live one's state, at the render's sample rate.
 registerInsertRenderer({
   masterChain: () => masterChain,
-  async process({ stems, chains, master, haps, sampleRate }) {
+  async process({ stems, segments, master, haps, sampleRate }) {
     const loadedInstances = [];
+    // the render's own instance of each effect, by name (as live: a name keeps its instance, and
+    // its state, across chain changes)
+    const instances = new Map();
     const loadChain = async (chain, key) => {
       const effects = [];
       for (const effect of chain) {
         const name = instanceName(effect, key);
-        const index = await Invoke('mix_load_fx_instance', { plugin: effect.plugin, sampleRate, instance: name });
-        loadedInstances.push(index);
-        if (effect.state != null) await Invoke('mix_set_state', { plugin: index, state: effect.state });
-        const params = new Map((await Invoke('mix_param_list', { plugin: index })).map((p) => [p.name.toLowerCase(), p]));
-        effects.push({ name, index, params });
+        if (!instances.has(name)) {
+          const index = await Invoke('mix_load_fx_instance', { plugin: effect.plugin, sampleRate, instance: name });
+          loadedInstances.push(index);
+          if (effect.state != null) await Invoke('mix_set_state', { plugin: index, state: effect.state });
+          const params = new Map((await Invoke('mix_param_list', { plugin: index })).map((p) => [p.name.toLowerCase(), p]));
+          instances.set(name, { name, index, params });
+        }
+        effects.push(instances.get(name));
       }
       return effects;
     };
@@ -310,14 +441,25 @@ registerInsertRenderer({
         }
       }
     };
-    const run = async (buffer, effects) => {
+    // runs the buffer through the chain of each part: [{ from (frame), effects }], in order (an
+    // empty chain passes the audio as it is)
+    const run = async (buffer, parts) => {
       const frames = buffer.length;
       const [left, right] = [buffer.getChannelData(0), buffer.getChannelData(1)];
       const out = new AudioBuffer({ numberOfChannels: 2, length: frames, sampleRate });
       const [outL, outR] = [out.getChannelData(0), out.getChannelData(1)];
       const step = 8192;
-      for (let start = 0; start < frames; start += step) {
-        const n = Math.min(step, frames - start);
+      for (let start = 0; start < frames; ) {
+        const k = parts.findLastIndex((p) => p.from <= start);
+        const effects = k < 0 ? [] : parts[k].effects;
+        const partEnd = parts[k + 1]?.from ?? frames;
+        const n = Math.min(step, partEnd - start, frames - start);
+        if (!effects.length) {
+          outL.set(left.subarray(start, start + n), start);
+          outR.set(right.subarray(start, start + n), start);
+          start += n;
+          continue;
+        }
         const chunk = new Float32Array(n * 2);
         for (let i = 0; i < n; i++) {
           chunk[i * 2] = left[start + i];
@@ -331,20 +473,24 @@ registerInsertRenderer({
           outL[start + i] = processed[i * 2];
           outR[start + i] = processed[i * 2 + 1];
         }
+        start += n;
       }
       return out;
     };
     try {
       const processedStems = new Map();
       for (const [orbit, stem] of stems) {
-        const chain = chains.get(orbit);
-        if (!chain?.length) {
+        const list = segments.get(orbit) ?? [];
+        if (!list.some((s) => s.chain?.length)) {
           processedStems.set(orbit, stem);
           continue;
         }
-        const effects = await loadChain(chain, `orbit ${orbit}`);
-        await automate(effects, orbit);
-        processedStems.set(orbit, await run(stem, effects));
+        const parts = [];
+        for (const { t, chain } of list) {
+          parts.push({ from: Math.max(0, Math.round(t * sampleRate)), effects: await loadChain(chain ?? [], `orbit ${orbit}`) });
+        }
+        await automate([...new Set(parts.flatMap((p) => p.effects))], orbit);
+        processedStems.set(orbit, await run(stem, parts));
       }
       const length = [...stems.values()][0]?.length ?? 0;
       let mix = new AudioBuffer({ numberOfChannels: 2, length: Math.max(1, length), sampleRate });
@@ -358,7 +504,7 @@ registerInsertRenderer({
       if (master?.length) {
         const effects = await loadChain(master, 'master');
         await automate(effects, null);
-        mix = await run(mix, effects);
+        mix = await run(mix, [{ from: 0, effects }]);
       }
       return { stems: processedStems, mix };
     } finally {

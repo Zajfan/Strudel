@@ -13,7 +13,7 @@ use std::time::{ Duration, Instant };
 use serde::Deserialize;
 
 use super::plugins::{
-  decode_state, encode_state, find_plugin, gui_title, host_gui, load_plugin_kind, load_state, save_state, wait_unloaded, Loaded, NewSlot,
+  find_plugin, gui_title, host_gui, load_plugin_kind, load_state, save_state, wait_unloaded, Loaded, NewSlot,
   NoteEvent, ParamDesc, Slot, BLOCK, CHANNELS,
 };
 use super::vst3::{ self, find_vst3, Vst3Slot };
@@ -135,8 +135,6 @@ pub struct MixerEngine {
   inner: Mutex<Option<Inner>>,
 }
 
-const VST3_STATE_PREFIX: &str = "vst3:";
-
 // The render thread: plugins with their pending notes, rendering on request.
 fn render_thread(commands: Receiver<Command>) {
   // per plugin: the slot, its pending notes and its pending parameter changes
@@ -244,6 +242,7 @@ fn render_thread(commands: Receiver<Command>) {
 
 impl MixerEngine {
   // Loads a plugin under its own name for the given sample rate (the page's), see load_as.
+  #[cfg(test)]
   pub fn load(&self, plugin: &str, sample_rate: f64) -> Result<usize, String> {
     self.load_as(plugin, plugin, sample_rate)
   }
@@ -289,6 +288,7 @@ impl MixerEngine {
   // Loads a new instance of a plugin, apart from the live ones (for an export), and returns its index.
   // It starts as the live instance `name` is, if that is loaded and the same plugin (its patch, GUI
   // tweaks).
+  #[cfg(test)]
   pub fn load_instance(&self, plugin: &str, sample_rate: f64) -> Result<usize, String> {
     self.load_instance_of(plugin, plugin, sample_rate)
   }
@@ -320,14 +320,14 @@ impl MixerEngine {
   // A plugin's state as text (see plugins::save_state), and loading one.
   pub fn state(&self, plugin: usize) -> Result<String, String> {
     if let Some(id) = self.vst3_id(plugin) {
-      return encode_state(VST3_STATE_PREFIX, &vst3::save_state(id)?);
+      return vst3::save_state_text(id);
     }
     save_state(self.host_id(plugin)?)
   }
 
   pub fn set_state(&self, plugin: usize, state: &str) -> Result<(), String> {
     if let Some(id) = self.vst3_id(plugin) {
-      return vst3::load_state(id, decode_state(VST3_STATE_PREFIX, state)?);
+      return vst3::load_state_text(id, state);
     }
     load_state(self.host_id(plugin)?, state)
   }
@@ -779,6 +779,25 @@ mod tests {
     let rms = |from: usize, to: usize| (out[from..to].iter().map(|s| s * s).sum::<f32>() / (to - from) as f32).sqrt();
     println!("chain of {}: burst {} tail {}", chain.len(), rms(0, 4800), rms(9600, 20000));
     assert!(rms(0, 4800) > 0.01 && rms(9600, 20000) > 0.01, "the chain didn't process");
+    // parameters in the plugin's own units: Global Volume at its minimum mutes, as with CLAP
+    let volume = mixer.param_list(synth).unwrap().into_iter().find(|p| p.name.eq_ignore_ascii_case("Global Volume")).unwrap();
+    println!("VST3 Global Volume: {} to {}, default {}", volume.min, volume.max, volume.default);
+    assert!(volume.max > 1.0 || volume.min < 0.0, "Global Volume still 0-1: {:?}", (volume.min, volume.max));
+    let loud = {
+      mixer.notes(synth, vec![MixNote { time: 0.3, duration: 0.3, key: 60, velocity: 0.8 }]).unwrap();
+      let bytes = mixer.render(synth, 9400, 28800).unwrap();
+      let x: Vec<f32> = bytes.chunks_exact(8).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect();
+      (x.iter().map(|s| s * s).sum::<f32>() / x.len() as f32).sqrt()
+    };
+    mixer.params(synth, vec![MixParam { time: 0.8, id: volume.id, value: volume.min }]).unwrap();
+    let muted = {
+      mixer.notes(synth, vec![MixNote { time: 0.85, duration: 0.3, key: 60, velocity: 0.8 }]).unwrap();
+      let bytes = mixer.render(synth, 38200, 28800).unwrap();
+      let x: Vec<f32> = bytes.chunks_exact(8).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect();
+      (x.iter().map(|s| s * s).sum::<f32>() / x.len() as f32).sqrt()
+    };
+    println!("VST3 loud {} muted {}", loud, muted);
+    assert!(loud > 0.01 && muted < loud / 10.0, "Global Volume at its minimum didn't mute");
     // state: text with its own prefix, loaded back
     let state = mixer.state(chain[0]).unwrap();
     assert!(state.starts_with("vst3:"));

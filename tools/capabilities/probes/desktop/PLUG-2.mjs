@@ -9,11 +9,12 @@
 //    output is one insert latency after the orbits, no chunk came back from Rust too late, and code
 //    without clapfx/masterfx removes the inserts (latency 0).
 // 3. Effects in exports: the same pattern (and a Surge XT instrument through the effect) as stems:
-//    orbit 2's stem has the tail, orbit 3's not.
+//    orbit 2's stem has the tail, orbit 3's not; and a chain that changes during the song (the
+//    effect in cycle 0, clapfx(null) in cycle 1) is followed.
 // 4. VST3 (Surge XT's VST3 build, by { format: 'vst3' }): live in the mixer, its notes within
 //    MAX_VST3_MS of a reference superdough note; an export with a VST3 effect on an orbit has the
 //    effect's tail in that orbit's stem; its state is text that starts with "vst3:"; its editor
-//    opens in a window that shows something, and closes.
+//    opens in a window that shows something, and closes; it plays on the native output too.
 // Without Surge XT in a CLAP folder this is not-run (see the follow-ups doc for installing it).
 
 import { execFileSync } from 'node:child_process';
@@ -240,6 +241,17 @@ export async function probe({ page, thresholds }) {
       tail: { fx: rmsRange(two, 48000 * 1.5, 48000 * 1.9), dry: rmsRange(three, 48000 * 0.3, 48000 * 0.9) },
       fxRms: rmsOf(two),
     };
+    // a chain that changes during the song: the effect in cycle 0, none (clapfx(null)) in cycle 1
+    const changing = await renderStemsInPage(
+      page,
+      () => {
+        const ping = note("c5 ~ ~ ~").s('sine').decay(0.05).sustain(0).orbit(2);
+        return cat(ping.clapfx('Surge XT Effects'), ping.clapfx(null));
+      },
+      { cps: 1, cycles: 2, sampleRate: 48000 },
+    );
+    const stem = changing.stems.get(2);
+    exported.changing = { withFx: rmsRange(stem, 48000 * 0.3, 48000 * 0.9), withoutFx: rmsRange(stem, 48000 * 1.3, 48000 * 1.9) };
   } catch (err) {
     exported = { error: String(err?.message ?? err) };
   }
@@ -278,6 +290,24 @@ export async function probe({ page, thresholds }) {
     await new Promise((r) => setTimeout(r, 500));
     const guiClosed = !windows().includes(`"${title}"`);
     await page.evaluate(() => unloadClap('v3'));
+    // on the native output (the harness's silent device)
+    const native = await page.evaluate(async (code) => {
+      const T = window.__TAURI_INTERNALS__;
+      await setPluginDevice('strudel_null');
+      const m = window.strudelMirror;
+      try {
+        m.setCode(code);
+        await m.evaluate();
+        const error = String(m.repl.state.error || '');
+        if (error) return { error };
+        await new Promise((r) => setTimeout(r, 3000));
+      } finally {
+        m.stop();
+      }
+      const stats = await T.invoke('engine_stats');
+      await unloadClap('vn');
+      return { stats };
+    }, `setcps(1)\nnote("c4 e4 g4 c5").clap('${PLUGIN}', { format: 'vst3', output: 'native', id: 'vn' })`);
     const rendered = await renderStemsInPage(
       page,
       () =>
@@ -293,6 +323,7 @@ export async function probe({ page, thresholds }) {
       statePrefix: state.slice(0, 5),
       stateChars: state.length,
       gui: { error: guiOpen.error, width, height, colours, closed: guiClosed },
+      native: native.error ? { error: native.error } : { notes: native.stats.notes, lateNotes: native.stats.lateNotes, lateBlocks: native.stats.lateBlocks, plugins: native.stats.plugins },
       exportTail: { fx: rmsRange(rendered.stems.get(2), 48000 * 1.5, 48000 * 1.9), dry: rmsRange(rendered.stems.get(3), 48000 * 0.3, 48000 * 0.9) },
     };
   } catch (err) {
@@ -322,7 +353,7 @@ export async function probe({ page, thresholds }) {
   if (!(effects.tail.fx > 10 * effects.tail.dry && effects.tail.fx >= thresholds.minRms)) return fail(`effects: no tail on the effect's orbit (${effects.tail.fx} vs ${effects.tail.dry})`);
   const lagOff = effects.masterLagMs.map((d) => Math.abs(d - effects.insertLatencyMs));
   if (!(effects.masterLagMs.length >= 3 && Math.max(...lagOff) <= MAX_SYNC_MS)) return fail(`effects: the master is not one insert latency (${effects.insertLatencyMs.toFixed(1)} ms) after the orbits: ${effects.masterLagMs}`);
-  const late = Object.values(effects.fxStats ?? {}).reduce((n, s) => n + s.lateFrames, 0);
+  const late = Object.values(effects.fxStats ?? {}).reduce((n, s) => n + (s.lateFrames ?? 0), 0);
   if (late > 0) return fail(`effects: ${late} frames came back from Rust too late (played dry)`);
   if (effects.liveError) return fail(`effects: ${effects.liveError}`);
   if (effects.latencyAfterRemoval.orbit2 !== 0 || effects.latencyAfterRemoval.master !== 0) return fail('effects: code without clapfx/masterfx left an insert in place');
@@ -331,11 +362,16 @@ export async function probe({ page, thresholds }) {
   if (vst3.error) return fail(`VST3: ${vst3.error}`);
   if (!(vst3.notes >= 3 && vst3.syncMs.length >= 3)) return fail(`VST3: ${vst3.notes} notes, ${vst3.syncMs.length} matched the reference`);
   if (!(Math.max(...vst3.syncMs.map(Math.abs)) <= MAX_VST3_MS)) return fail(`VST3: notes off the reference by up to ${Math.max(...vst3.syncMs.map(Math.abs)).toFixed(2)} ms`);
+  if (vst3.native.error) return fail(`VST3 on the native output: ${vst3.native.error}`);
+  if (!(vst3.native.notes >= 8)) return fail(`VST3 on the native output: ${vst3.native.notes} notes played`);
   if (vst3.statePrefix !== 'vst3:') return fail(`VST3: the state starts with ${vst3.statePrefix}`);
   if (vst3.gui.error) return fail(`VST3 GUI: ${vst3.gui.error}`);
   if (!(vst3.gui.width > 100 && vst3.gui.height > 100 && vst3.gui.colours > 50)) return fail(`VST3 GUI: ${vst3.gui.width}x${vst3.gui.height}, ${vst3.gui.colours} colours`);
   if (!vst3.gui.closed) return fail('VST3 GUI: still open after clapGui(name, false)');
   if (!(vst3.exportTail.fx > 10 * vst3.exportTail.dry && vst3.exportTail.fx >= thresholds.minRms)) return fail(`VST3 effect in an export: no tail (${vst3.exportTail.fx} vs ${vst3.exportTail.dry})`);
+  if (!(exported.changing.withFx >= thresholds.minRms && exported.changing.withoutFx < exported.changing.withFx / 100)) {
+    return fail(`effects in exports: a chain change during the song wasn't followed (${exported.changing.withFx} with, ${exported.changing.withoutFx} without)`);
+  }
   if (PENDING.length) return fail(`not built yet: ${PENDING.join(', ')}`);
   return { status: 'pass', metrics, notes };
 }

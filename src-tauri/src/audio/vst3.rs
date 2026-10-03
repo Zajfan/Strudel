@@ -60,6 +60,93 @@ struct Hosted {
   plugin: Plugin,
   buffers: BusAudioBuffers,
   editor: Option<X11Window>,
+  // how each parameter's values (as patterns give them) map to VST3's normalized 0-1
+  scales: HashMap<u32, Scale>,
+  // the last conversion per parameter: automation often repeats a value
+  last: HashMap<u32, (f64, f64)>,
+}
+
+// A VST3 parameter's values for patterns, as for CLAP: in the plugin's own units.
+#[derive(Clone, Copy)]
+enum Scale {
+  // a list or switch: the step's index, 0 to steps
+  Stepped(u32),
+  // a number the plugin displays (Hz, s, dB, %, ...): from its display at 0 and at 1, with values
+  // in between found on the display itself, so curved (log) scales come out right
+  Numeric { lo: f64, hi: f64 },
+  // anything else: 0-1
+  Normalized,
+}
+
+// The number in a parameter's display text, in base units ("1.2 kHz" -> 1200, "500 ms" -> 0.5);
+// "-inf" (as in "-inf dB") reads as -1000.
+fn parse_display(text: &str) -> Option<f64> {
+  let text = text.trim();
+  let lower = text.to_lowercase();
+  if lower.starts_with("-inf") || lower.starts_with("-\u{221e}") {
+    return Some(-1000.0);
+  }
+  let start = text.find(|c: char| c.is_ascii_digit() || c == '-' || c == '+' || c == '.')?;
+  let rest = &text[start..];
+  let end = rest
+    .char_indices()
+    .find(|&(i, c)| !(c.is_ascii_digit() || c == '.' || c == ',' || ((c == '-' || c == '+') && i == 0)))
+    .map(|(i, _)| i)
+    .unwrap_or(rest.len());
+  let number = &rest[..end];
+  let number = if number.contains('.') { number.replace(',', "") } else { number.replace(',', ".") };
+  let value: f64 = number.parse().ok()?;
+  let unit = rest[end..].trim();
+  let scale = match unit.chars().next() {
+    Some('k') if unit.len() > 1 => 1000.0,
+    Some('M') if unit.len() > 1 => 1e6,
+    Some('m') if unit.len() > 1 && unit != "min" => 0.001,
+    _ => 1.0,
+  };
+  Some(value * scale).filter(|v| v.is_finite())
+}
+
+fn scale_of(plugin: &Plugin, param: &vst3_host::parameters::Parameter) -> Scale {
+  if param.step_count > 0 {
+    return Scale::Stepped(param.step_count as u32);
+  }
+  let at = |x: f64| plugin.format_parameter(param.id, x).ok().and_then(|t| parse_display(&t));
+  match (at(0.0), at(0.5), at(1.0)) {
+    (Some(lo), Some(mid), Some(hi)) if (lo < mid && mid < hi) || (lo > mid && mid > hi) => Scale::Numeric { lo, hi },
+    _ => Scale::Normalized,
+  }
+}
+
+// a pattern's value for a parameter -> normalized
+fn to_normalized(plugin: &Plugin, id: u32, scale: Scale, value: f64) -> f64 {
+  match scale {
+    Scale::Normalized => value.clamp(0.0, 1.0),
+    Scale::Stepped(steps) => (value.round() / steps as f64).clamp(0.0, 1.0),
+    Scale::Numeric { lo, hi } => {
+      let rising = hi > lo;
+      if (rising && value <= lo) || (!rising && value >= lo) {
+        return 0.0;
+      }
+      if (rising && value >= hi) || (!rising && value <= hi) {
+        return 1.0;
+      }
+      // bisection on the plugin's own display
+      let (mut a, mut b) = (0.0f64, 1.0f64);
+      for _ in 0..30 {
+        let m = 0.5 * (a + b);
+        let shown = plugin.format_parameter(id, m).ok().and_then(|t| parse_display(&t)).unwrap_or(f64::NAN);
+        if shown.is_nan() {
+          break;
+        }
+        if (shown < value) == rising {
+          a = m;
+        } else {
+          b = m;
+        }
+      }
+      0.5 * (a + b)
+    }
+  }
 }
 
 fn thread() -> Sender<Command> {
@@ -125,18 +212,29 @@ fn handle(command: Command, host: Option<&mut Vst3Host>, plugins: &mut HashMap<u
         if effect && !layout.inputs.first().map_or(false, |b| b.active && b.channel_count > 0) {
           return Err("the plugin has no audio input".to_string());
         }
+        let mut scales = HashMap::new();
         let params = plugin
           .get_parameters()
           .map_err(|e| e.to_string())?
           .into_iter()
           .filter(|p| p.can_automate && !p.is_read_only)
-          .map(|p| ParamDesc { id: p.id, name: p.name, module: p.unit, min: 0.0, max: 1.0, default: p.default })
+          .map(|p| {
+            let scale = scale_of(&plugin, &p);
+            scales.insert(p.id, scale);
+            let shown = |x: f64| plugin.format_parameter(p.id, x).ok().and_then(|t| parse_display(&t));
+            let (min, max, default) = match scale {
+              Scale::Normalized => (0.0, 1.0, p.default),
+              Scale::Stepped(steps) => (0.0, steps as f64, (p.default * steps as f64).round()),
+              Scale::Numeric { lo, hi } => (lo.min(hi), lo.max(hi), shown(p.default).unwrap_or(lo)),
+            };
+            ParamDesc { id: p.id, name: p.name, module: p.unit, min, max, default }
+          })
           .collect();
         plugin.start_processing().map_err(|e| e.to_string())?;
         let buffers = plugin.create_bus_audio_buffers(BLOCK).map_err(|e| e.to_string())?;
         let id = *next_id;
         *next_id += 1;
-        plugins.insert(id, Hosted { plugin, buffers, editor: None });
+        plugins.insert(id, Hosted { plugin, buffers, editor: None, scales, last: HashMap::new() });
         Ok((id, params))
       })();
       let _ = reply.send(result);
@@ -208,7 +306,15 @@ fn render(hosted: &mut Hosted, n: usize, notes: &[BlockNote], params: &[(u32, u3
     let _ = plugin.send_midi_event_at(event, offset as i32);
   }
   for &(offset, id, value) in params {
-    let _ = plugin.set_parameter_at(id, value.clamp(0.0, 1.0), offset as i32);
+    let normalized = match hosted.last.get(&id) {
+      Some(&(v, n)) if v == value => n,
+      _ => {
+        let n = to_normalized(plugin, id, hosted.scales.get(&id).copied().unwrap_or(Scale::Normalized), value);
+        hosted.last.insert(id, (value, n));
+        n
+      }
+    };
+    let _ = plugin.set_parameter_at(id, normalized, offset as i32);
   }
   let buffers = &mut hosted.buffers;
   // vst3-host processes as many frames as the buffers hold: exactly n (capacity stays BLOCK)
@@ -249,23 +355,33 @@ pub(crate) struct Vst3Slot {
 
 impl Vst3Slot {
   pub(crate) fn render_with_notes(&mut self, out: &mut [f32], n: usize, notes: Vec<BlockNote>, params: &[(u32, u32, f64)]) {
-    self.block(out, n, notes, params, None);
+    self.block(out, n, notes, params, None, Duration::from_secs(2));
+  }
+
+  // For a real-time callback: waits at most `budget` for the block; false (and nothing added to
+  // out) if it didn't come in time. The plugin still renders it, so its timeline stays whole.
+  pub(crate) fn render_within(&mut self, out: &mut [f32], n: usize, notes: Vec<BlockNote>, params: &[(u32, u32, f64)], budget: Duration) -> bool {
+    self.block(out, n, notes, params, None, budget)
   }
 
   pub(crate) fn process_with_params(&mut self, input: &[f32], out: &mut [f32], n: usize, params: &[(u32, u32, f64)]) {
-    self.block(out, n, Vec::new(), params, Some(input[..n * CHANNELS].to_vec()));
+    self.block(out, n, Vec::new(), params, Some(input[..n * CHANNELS].to_vec()), Duration::from_secs(2));
   }
 
-  fn block(&mut self, out: &mut [f32], n: usize, notes: Vec<BlockNote>, params: &[(u32, u32, f64)], input: Option<Vec<f32>>) {
+  fn block(&mut self, out: &mut [f32], n: usize, notes: Vec<BlockNote>, params: &[(u32, u32, f64)], input: Option<Vec<f32>>, wait: Duration) -> bool {
     let (reply, rendered) = channel();
     let command = Command::Block { id: self.id, n, notes, params: params.to_vec(), input, reply };
     if thread().send(command).is_err() {
-      return;
+      return false;
     }
-    if let Ok(samples) = rendered.recv_timeout(Duration::from_secs(2)) {
-      for (o, s) in out.iter_mut().zip(samples) {
-        *o += s;
+    match rendered.recv_timeout(wait) {
+      Ok(samples) => {
+        for (o, s) in out.iter_mut().zip(samples) {
+          *o += s;
+        }
+        true
       }
+      Err(_) => false,
     }
   }
 }
@@ -279,6 +395,17 @@ pub(crate) fn load(path: PathBuf, sample_rate: f64, effect: bool) -> Result<(Vst
 
 pub(crate) fn unload(id: u64) {
   let _ = thread().send(Command::Unload { id });
+}
+
+// A plugin's state as text ("vst3:", then the state deflated, in base64), and loading one.
+const STATE_PREFIX: &str = "vst3:";
+
+pub(crate) fn save_state_text(id: u64) -> Result<String, String> {
+  super::plugins::encode_state(STATE_PREFIX, &save_state(id)?)
+}
+
+pub(crate) fn load_state_text(id: u64, state: &str) -> Result<(), String> {
+  load_state(id, super::plugins::decode_state(STATE_PREFIX, state)?)
 }
 
 pub(crate) fn save_state(id: u64) -> Result<Vec<u8>, String> {
@@ -297,4 +424,22 @@ pub(crate) fn gui(id: u64, title: &str, show: bool) -> Result<(), String> {
   let (reply, answer) = channel();
   thread().send(Command::Gui { id, title: title.to_string(), show, reply }).map_err(|e| e.to_string())?;
   answer.recv_timeout(Duration::from_secs(10)).map_err(|e| e.to_string())?
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn reads_numbers_in_base_units_from_display_text() {
+    assert_eq!(parse_display("-12.5 dB"), Some(-12.5));
+    assert_eq!(parse_display("1.2 kHz"), Some(1200.0));
+    assert_eq!(parse_display("440 Hz"), Some(440.0));
+    assert_eq!(parse_display("500 ms"), Some(0.5));
+    assert_eq!(parse_display("2.00 s"), Some(2.0));
+    assert_eq!(parse_display("50 %"), Some(50.0));
+    assert_eq!(parse_display("0,25"), Some(0.25));
+    assert_eq!(parse_display("-inf dB"), Some(-1000.0));
+    assert_eq!(parse_display("Saw"), None);
+  }
 }

@@ -62,19 +62,19 @@
         "triggers": 3,
         "drops": [
           {
-            "atSample": 24448,
+            "atSample": 23424,
             "beforeRms": 0.10756439488101793,
             "afterRms": 0.0022759870932965074,
             "dropDb": 33.489974869042925
           },
           {
-            "atSample": 72448,
+            "atSample": 71424,
             "beforeRms": 0.10756439488101793,
             "afterRms": 0.0022759870932965074,
             "dropDb": 33.489974869042925
           },
           {
-            "atSample": 120448,
+            "atSample": 119424,
             "beforeRms": 0.10756439488101793,
             "afterRms": 0.0022759870932965074,
             "dropDb": 33.489974869042925
@@ -82,7 +82,7 @@
         ],
         "dropDb": 33.489974869042925,
         "beforeRms": 0.10756439488101793,
-        "recordedSamples": 152576,
+        "recordedSamples": 151040,
         "sampleRate": 48000,
         "offline": {
           "orbits": [
@@ -110,13 +110,13 @@
         "offline": "renderPatternStems of mixPattern(): buses are orbits, the send is a delay on orbit 3, the sidechain is duckorbit from orbit 2 to orbit 1"
       },
       "run": {
-        "ranAt": "2026-10-03T07:49:35.068Z",
-        "commit": "bb4849c8",
+        "ranAt": "2026-10-03T11:00:50.644Z",
+        "commit": "d5a3a4eb",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
         "platform": "linux-x64",
-        "distBuiltAt": "2026-10-03T07:48:34.957Z",
+        "distBuiltAt": "2026-10-03T10:57:45.034Z",
         "thresholds": {
           "minDuckDb": 6
         }
@@ -238,15 +238,15 @@
       "status": "pass",
       "metrics": {
         "events": 1115,
-        "rms": 0.10670326024667884,
+        "rms": 0.10715805954019604,
         "lengthSamples": 3072000,
         "expectedLength": 3072000,
         "secondLength": 3072000,
         "hashes": [
-          "345dfda3",
-          "51f4c6dd"
+          "d46065f6",
+          "016507ab"
         ],
-        "firstDifferenceLeft": 2,
+        "firstDifferenceLeft": 5,
         "channels": 2,
         "wav": {
           "format": 1,
@@ -257,7 +257,7 @@
           "frames": 3072000,
           "fileBytes": 12288044
         },
-        "maxDiffDbfs": -81.540871433889,
+        "maxDiffDbfs": -81.53623607508216,
         "headline": "64 s WAV, repeatable within -81.5 dBFS"
       },
       "notes": {
@@ -265,13 +265,13 @@
         "scope": "left channel hashed; render has no tail"
       },
       "run": {
-        "ranAt": "2026-10-03T07:49:51.324Z",
-        "commit": "bb4849c8",
+        "ranAt": "2026-10-03T10:59:03.922Z",
+        "commit": "d5a3a4eb",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
         "platform": "linux-x64",
-        "distBuiltAt": "2026-10-03T07:48:34.957Z",
+        "distBuiltAt": "2026-10-03T10:57:45.034Z",
         "thresholds": {
           "minRms": 0.001,
           "maxDiffDbfs": -60
@@ -293,27 +293,27 @@
         ],
         "stemRms": {
           "1": 0.039059157460414114,
-          "2": 0.023485790956621146,
+          "2": 0.02348579095584522,
           "3": 0.027811885883111807,
           "4": 0.01560795278054175
         },
-        "residualDbfs": -151.67483677154434,
+        "residualDbfs": -152.31853043897235,
         "lengthSamples": 96000,
         "referenceLength": 96000,
-        "headline": "4 stems, residual -151.7 dBFS"
+        "headline": "4 stems, residual -152.3 dBFS"
       },
       "notes": {
         "reference": "renderPatternAudio stereo render of the same pattern",
         "scope": "left channels compared"
       },
       "run": {
-        "ranAt": "2026-10-03T07:49:52.150Z",
-        "commit": "bb4849c8",
+        "ranAt": "2026-10-03T10:59:04.662Z",
+        "commit": "d5a3a4eb",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
         "platform": "linux-x64",
-        "distBuiltAt": "2026-10-03T07:48:34.957Z",
+        "distBuiltAt": "2026-10-03T10:57:45.034Z",
         "thresholds": {
           "maxResidualDbfs": -60
         }

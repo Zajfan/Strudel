@@ -235,15 +235,15 @@
       "status": "pass",
       "metrics": {
         "events": 1115,
-        "rms": 0.10644800236252072,
+        "rms": 0.10667299997333228,
         "lengthSamples": 3072000,
         "expectedLength": 3072000,
         "secondLength": 3072000,
         "hashes": [
-          "2bf798d5",
-          "08263c6d"
+          "e83e3d19",
+          "5604ee42"
         ],
-        "firstDifferenceLeft": 7169,
+        "firstDifferenceLeft": 7300,
         "channels": 2,
         "wav": {
           "format": 1,
@@ -254,7 +254,7 @@
           "frames": 3072000,
           "fileBytes": 12288044
         },
-        "maxDiffDbfs": -81.50193415675076,
+        "maxDiffDbfs": -81.54550926774738,
         "headline": "64 s WAV, repeatable within -81.5 dBFS"
       },
       "notes": {
@@ -262,8 +262,8 @@
         "scope": "left channel hashed; render has no tail"
       },
       "run": {
-        "ranAt": "2026-10-03T08:05:34.863Z",
-        "commit": "217ffb77",
+        "ranAt": "2026-10-03T11:00:09.683Z",
+        "commit": "d5a3a4eb",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
@@ -289,7 +289,7 @@
         ],
         "stemRms": {
           "1": 0.03905915815210178,
-          "2": 0.02348579076055626,
+          "2": 0.02348579076110884,
           "3": 0.02781188544674936,
           "4": 0.015607953608395609
         },
@@ -303,8 +303,8 @@
         "scope": "left channels compared"
       },
       "run": {
-        "ranAt": "2026-10-03T08:05:36.681Z",
-        "commit": "217ffb77",
+        "ranAt": "2026-10-03T11:00:11.528Z",
+        "commit": "d5a3a4eb",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
@@ -469,15 +469,15 @@
         "pluginNotes": 4,
         "referenceNotes": 4,
         "syncOffsetsMs": [
-          0.36,
-          -0.48,
-          -0.43,
-          0.91
+          0.79,
+          1.18,
+          0.82,
+          1.04
         ],
-        "maxSyncOffsetMs": 0.9070294784580499,
-        "pluginRms": 0.04052616471837979,
-        "masterRms": 0.050253037662215554,
-        "reverbTailGainDb": 90.32127860177869,
+        "maxSyncOffsetMs": 1.179138321995465,
+        "pluginRms": 0.040430381333701484,
+        "masterRms": 0.05383708715143277,
+        "reverbTailGainDb": 92.37384313481301,
         "automatableParams": 598,
         "gui": {
           "width": 1141,
@@ -485,7 +485,7 @@
           "colours": 5071,
           "closed": true
         },
-        "automationDropDb": 154.58470664704913,
+        "automationDropDb": 157.1540204324855,
         "export": {
           "orbits": [
             1,
@@ -493,38 +493,38 @@
           ],
           "pluginStemNotes": 6,
           "offsetsMs": [
-            1.6,
-            0.6,
-            0.08,
-            1.54,
-            0.73,
-            1.13
+            2.88,
+            0.54,
+            0.35,
+            0.88,
+            1.17,
+            1.35
           ],
           "sineStemRms": 0.031134120806411116,
           "sineStemLeakRms": 0
         },
         "filters": {
-          "lpfDarkerDb": 14.886040953845807,
-          "hpfBrighterDb": 10.42933729268523,
-          "envelopeDropDb": 10.354525282092634
+          "lpfDarkerDb": 14.85313505513298,
+          "hpfBrighterDb": 10.459640948216109,
+          "envelopeDropDb": 10.30588184169784
         },
         "state": {
           "chars": 7698,
           "prefix": "clap1:",
           "differs": true,
-          "exportLikeLiveRms": 0.00023340047034025644,
-          "exportDefaultRms": 0.05886923264437085,
-          "exportMutedRms": 0.00023247546543562925
+          "exportLikeLiveRms": 0.00023319221244064758,
+          "exportDefaultRms": 0.05860003223805252,
+          "exportMutedRms": 0.00023263567737017343
         },
         "native": {
           "notes": 13,
           "lateNotes": 0,
           "device": "strudel_null",
-          "rms": 0.10064570919086228,
+          "rms": 0.1006473549388628,
           "paramChanges": 429,
           "loadedAfterUnload": []
         },
-        "headline": "Surge XT in the mixer: within 0.9 ms of the beat, room +90.3 dB, automation -155 dB, GUI 1141x711, export 6 notes within 1.6 ms, lpf -15 dB; native: 13 notes"
+        "headline": "Surge XT in the mixer: within 1.2 ms of the beat, room +92.4 dB, automation -157 dB, GUI 1141x711, export 6 notes within 2.9 ms, lpf -15 dB; native: 13 notes"
       },
       "notes": {
         "plugin": "Surge XT",
@@ -532,8 +532,8 @@
         "native": "setcps(1)\nnote(\"c4 e4 g4 c5\").clap('Surge XT', { output: 'native' })"
       },
       "run": {
-        "ranAt": "2026-10-03T08:05:04.125Z",
-        "commit": "217ffb77",
+        "ranAt": "2026-10-03T10:59:35.890Z",
+        "commit": "d5a3a4eb",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
@@ -682,8 +682,8 @@
       "status": "pass",
       "metrics": {
         "instances": {
-          "bassStemRms": 0.0001627330059865367,
-          "leadStemRms": 0.041409900327566175,
+          "bassStemRms": 0.0001623282725077323,
+          "leadStemRms": 0.04133685283817923,
           "loaded": [
             "bass",
             "lead"
@@ -693,17 +693,25 @@
         "vst3": {
           "notes": 4,
           "syncMs": [
-            1.75,
-            2.04,
-            1.86
+            1.22,
+            0.63,
+            1.84
           ],
           "statePrefix": "vst3:",
           "stateChars": 7917,
           "gui": {
             "width": 1141,
             "height": 711,
-            "colours": 5075,
+            "colours": 5076,
             "closed": true
+          },
+          "native": {
+            "notes": 13,
+            "lateNotes": 1,
+            "lateBlocks": 1,
+            "plugins": [
+              "vn"
+            ]
           },
           "exportTail": {
             "fx": 0.0021862959276125215,
@@ -711,8 +719,8 @@
           }
         },
         "effects": {
-          "insertLatencyMs": 46.439909297052154,
-          "orbit2LatencyMs": 92.87981859410431,
+          "insertLatencyMs": 34.82993197278911,
+          "orbit2LatencyMs": 69.65986394557822,
           "notes": {
             "fx": 5,
             "dry": 5
@@ -725,24 +733,48 @@
             0.05
           ],
           "masterLagMs": [
-            46.49,
-            46.49,
-            46.49,
-            46.49,
-            46.49
+            34.88,
+            34.88,
+            34.88,
+            34.88,
+            34.88
           ],
           "tail": {
-            "fx": 0.0025053553495967555,
+            "fx": 0.0025053426702351562,
             "dry": 0
           },
           "fxStats": {
             "orbit 2": {
-              "frames": 189952,
-              "lateFrames": 0
+              "frames": 190464,
+              "lateBySecond": [],
+              "lateAt": [],
+              "lateFrames": 0,
+              "maxAgeFrames": [
+                1408,
+                640,
+                768,
+                896,
+                768
+              ]
             },
+            "roundTripsMs": [
+              25,
+              5,
+              13,
+              7
+            ],
             "master": {
-              "frames": 189952,
-              "lateFrames": 0
+              "frames": 190464,
+              "lateBySecond": [],
+              "lateAt": [],
+              "lateFrames": 0,
+              "maxAgeFrames": [
+                1408,
+                640,
+                768,
+                896,
+                768
+              ]
             }
           },
           "latencyAfterRemoval": {
@@ -756,21 +788,25 @@
             3
           ],
           "tail": {
-            "fx": 0.005361601977219245,
+            "fx": 0.005175386919595091,
             "dry": 0
           },
-          "fxRms": 0.03104543786611961
+          "fxRms": 0.03128608617484052,
+          "changing": {
+            "withFx": 0.0017857221288341508,
+            "withoutFx": 0
+          }
         },
         "pending": [],
-        "headline": "2 instances; effects within 0.1 ms after a 46 ms insert; VST3 within 2.0 ms, GUI 1141x711"
+        "headline": "2 instances; effects within 0.1 ms after a 35 ms insert; VST3 within 1.8 ms, GUI 1141x711"
       },
       "notes": {
         "plugin": "Surge XT",
         "instances": "setcps(1)\n$: note(\"c3 ~ ~ ~\").clap('Surge XT', { id: 'bass' }).auto(0, { c: 'Global Volume' })\n$: note(\"e4 ~ ~ ~\").clap('Surge XT', { id: 'lead' }).orbit(2)"
       },
       "run": {
-        "ranAt": "2026-10-03T08:05:22.934Z",
-        "commit": "217ffb77",
+        "ranAt": "2026-10-03T10:59:57.808Z",
+        "commit": "d5a3a4eb",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
