@@ -66,16 +66,19 @@ const loadPlayer = (audioContext) => {
   return playerModules.get(audioContext);
 };
 
-// per plugin: { audioContext, ready: Promise<{ index, params }> }, for the current AudioContext;
+// per instance name (a pattern's id, or else the plugin's name): { audioContext, plugin,
+// ready: Promise<{ index, params, ... }> }, for the current AudioContext;
 // params maps a parameter's lower-case name to { id, name, module, min, max, default }
 const streams = new Map();
 
-function getStream(plugin) {
+function getStream(name, plugin = name) {
   const audioContext = getAudioContext();
-  let stream = streams.get(plugin);
-  if (stream?.audioContext === audioContext) return stream;
+  let stream = streams.get(name);
+  if (stream?.audioContext === audioContext && stream.plugin === plugin) return stream;
+  // another plugin by this name: its player goes
+  stream?.ready.then(({ player }) => player.disconnect()).catch(() => {});
   const ready = (async () => {
-    const index = await Invoke('mix_load', { plugin, sampleRate: audioContext.sampleRate });
+    const index = await Invoke('mix_load', { plugin, sampleRate: audioContext.sampleRate, instance: name });
     const params = new Map((await Invoke('mix_param_list', { plugin: index })).map((p) => [p.name.toLowerCase(), p]));
     await loadPlayer(audioContext);
     const player = new AudioWorkletNode(audioContext, 'strudel-plugin-player', {
@@ -90,15 +93,15 @@ function getStream(plugin) {
         player.port.postMessage({ start, samples }, [samples.buffer]);
       } catch (err) {
         player.port.postMessage({});
-        logger(`[clap] ${plugin}: ${err}`, 'error');
+        logger(`[clap] ${name}: ${err}`, 'error');
       }
     };
-    player.connect(getExternalChannel(`clap:${plugin}`).input);
+    player.connect(getExternalChannel(`clap:${name}`).input);
     // state: the state last loaded from a pattern (see setState)
     return { index, params, player, state: undefined, stateLoaded: Promise.resolve() };
   })();
-  stream = { audioContext, ready };
-  streams.set(plugin, stream);
+  stream = { audioContext, plugin, ready };
+  streams.set(name, stream);
   return stream;
 }
 
@@ -140,16 +143,16 @@ async function sendToMixer({ index, params }, value, time, duration) {
   await Invoke('mix_notes', { plugin: index, notes });
 }
 
-function playInMixer(plugin, hap, cps, targetTime) {
+function playInMixer(name, plugin, hap, cps, targetTime) {
   // the channel takes the hap's controls (gain, pan, orbit, delay, room, cue, filters) from this time
   const duration = hap.duration.valueOf() / cps;
-  getExternalChannel(`clap:${plugin}`).update(hap.value, targetTime, cps, duration);
-  getStream(plugin)
+  getExternalChannel(`clap:${name}`).update(hap.value, targetTime, cps, duration);
+  getStream(name, plugin)
     .ready.then(async (stream) => {
       await setState(stream, hap.context.clapState);
       await sendToMixer(stream, hap.value, targetTime, duration);
     })
-    .catch((err) => logger(`[clap] ${plugin}: ${err}`, 'error'));
+    .catch((err) => logger(`[clap] ${name}: ${err}`, 'error'));
 }
 
 // Exports (offline renders): each plugin gets an instance of its own at the export's sample rate, gets
@@ -158,28 +161,28 @@ function playInMixer(plugin, hap, cps, targetTime) {
 registerOfflineRenderer('clap', {
   start(audioContext) {
     const sampleRate = audioContext.sampleRate;
-    // per plugin: Promise<{ index, params }>
+    // per instance name: Promise<{ index, params, ... }>
     const instances = new Map();
-    const instance = (plugin) => {
-      if (!instances.has(plugin)) {
+    const instance = (name, plugin) => {
+      if (!instances.has(name)) {
         instances.set(
-          plugin,
+          name,
           (async () => {
-            const index = await Invoke('mix_load_instance', { plugin, sampleRate });
+            const index = await Invoke('mix_load_instance', { plugin, sampleRate, instance: name });
             const params = new Map((await Invoke('mix_param_list', { plugin: index })).map((p) => [p.name.toLowerCase(), p]));
             // it starts as the live plugin is; a pattern's state goes over that
             return { index, params, state: undefined, stateLoaded: Promise.resolve() };
           })(),
         );
       }
-      return instances.get(plugin);
+      return instances.get(name);
     };
     return {
       async trigger(hap, t, duration, cps) {
-        const { clapPlugin: plugin } = hap.context;
+        const { clapPlugin: plugin, clapName: name } = hap.context;
         hap.ensureObjectValue();
-        getExternalChannel(`clap:${plugin}`).update(hap.value, t, cps, duration);
-        const loaded = await instance(plugin);
+        getExternalChannel(`clap:${name}`).update(hap.value, t, cps, duration);
+        const loaded = await instance(name, plugin);
         await setState(loaded, hap.context.clapState);
         await sendToMixer(loaded, hap.value, t, duration);
       },
@@ -187,7 +190,7 @@ registerOfflineRenderer('clap', {
         const start = Math.round(from * sampleRate);
         const frames = Math.round(to * sampleRate) - start;
         if (frames <= 0) return;
-        for (const [plugin, loading] of instances) {
+        for (const [name, loading] of instances) {
           const { index } = await loading;
           const samples = new Float32Array(await Invoke('mix_render', { plugin: index, start, frames }));
           const buffer = new AudioBuffer({ numberOfChannels: 2, length: frames, sampleRate });
@@ -197,7 +200,7 @@ registerOfflineRenderer('clap', {
             right[i] = samples[i * 2 + 1];
           }
           const source = new AudioBufferSourceNode(audioContext, { buffer });
-          source.connect(getExternalChannel(`clap:${plugin}`).input);
+          source.connect(getExternalChannel(`clap:${name}`).input);
           source.start(start / sampleRate);
         }
       },
@@ -227,7 +230,15 @@ const getNativeParams = (plugin) => {
   return nativeParams.get(plugin);
 };
 
-function playNative(plugin, hap, currentTime, cps, targetTime) {
+// which plugin each instance name is on the native output: another plugin by that name replaces it
+const nativePlugins = new Map();
+
+function playNative(name, plugin, hap, currentTime, cps, targetTime) {
+  if (nativePlugins.get(name) !== plugin) {
+    nativePlugins.set(name, plugin);
+    nativeStates.delete(name);
+    nativeParams.delete(name);
+  }
   const { note, velocity = 0.9, gain = 1 } = hap.value;
   const time = toEpochMs(targetTime, currentTime);
   const duration = (hap.duration.valueOf() / cps) * 1000;
@@ -235,17 +246,19 @@ function playNative(plugin, hap, currentTime, cps, targetTime) {
   // clap_play loads the plugin (and starts the engine) if needed; the state and parameters go after it
   const { clapState: state } = hap.context;
   const play =
-    state != null && nativeStates.get(plugin) !== state
-      ? Invoke('clap_play', { plugin, notes: [] }).then(() => {
-          nativeStates.set(plugin, state);
-          return Invoke('clap_set_state', { plugin, state }).then(() => Invoke('clap_play', { plugin, notes }));
+    state != null && nativeStates.get(name) !== state
+      ? Invoke('clap_play', { plugin, notes: [], instance: name }).then(() => {
+          nativeStates.set(name, state);
+          return Invoke('clap_set_state', { plugin: name, state }).then(() =>
+            Invoke('clap_play', { plugin, notes, instance: name }),
+          );
         })
-      : Invoke('clap_play', { plugin, notes });
+      : Invoke('clap_play', { plugin, notes, instance: name });
   play
     .then(async () => {
       if (!hap.value.auto) return;
-      const changes = paramChanges(hap.value, await getNativeParams(plugin), time, duration);
-      if (changes.length) await Invoke('clap_params', { plugin, params: changes });
+      const changes = paramChanges(hap.value, await getNativeParams(name), time, duration);
+      if (changes.length) await Invoke('clap_params', { plugin: name, params: changes });
     })
     .catch((err) => logger(`[clap] ${err}`, 'error'));
 }
@@ -269,23 +282,30 @@ function playNative(plugin, hap, currentTime, cps, targetTime) {
  * pasting what clapState(name) gives into `state`:
  *   note("c3 e3").clap('Surge XT', { state: 'clap1:eNrtW...' })
  * @param {boolean} [options.gui] open the plugin's own window once it has loaded (see clapGui)
+ * Each plugin name is one instance; `id` names separate instances of the same plugin, e.g. two
+ * Surge XTs with their own patches:
+ *   $: note("c2 g1").clap('Surge XT', { id: 'bass' })
+ *   $: note("e4 g4 b4").clap('Surge XT', { id: 'lead' })
+ * and clapGui, clapState, clapParams and unloadClap then take the id.
  * @param {string} [options.state] a state from clapState, loaded into the plugin before its notes
+ * @param {string} [options.id] the instance's name (default: the plugin's name)
  */
-Pattern.prototype.clap = function (plugin, { output = 'mixer', gui = false, state } = {}) {
+Pattern.prototype.clap = function (plugin, { output = 'mixer', gui = false, state, id } = {}) {
+  const name = id ?? plugin;
   const pattern = this.withHap((hap) =>
-    hap.setContext({ ...hap.context, offlineRenderer: 'clap', clapPlugin: plugin, clapState: state }),
+    hap.setContext({ ...hap.context, offlineRenderer: 'clap', clapPlugin: plugin, clapName: name, clapState: state }),
   );
   return pattern.onTrigger((hap, currentTime, cps, targetTime) => {
     hap.ensureObjectValue();
-    if (gui && !guiOpened.has(plugin)) {
-      guiOpened.add(plugin);
+    if (gui && !guiOpened.has(name)) {
+      guiOpened.add(name);
       // once the first note has loaded it
-      setTimeout(() => clapGui(plugin).catch((err) => logger(`[clap] ${plugin} GUI: ${err}`, 'error')), 500);
+      setTimeout(() => clapGui(name).catch((err) => logger(`[clap] ${name} GUI: ${err}`, 'error')), 500);
     }
     if (output === 'native') {
-      playNative(plugin, hap, currentTime, cps, targetTime);
+      playNative(name, plugin, hap, currentTime, cps, targetTime);
     } else {
-      playInMixer(plugin, hap, cps, targetTime);
+      playInMixer(name, plugin, hap, cps, targetTime);
     }
   });
 };
@@ -298,7 +318,8 @@ const guiOpened = new Set();
 export const clapGui = (plugin, show = true) => Invoke('clap_gui', { plugin, show });
 
 // The parameters of a plugin that patterns can automate: [{ id, name, module, min, max, default }].
-export const clapParams = async (plugin) => [...(await getStream(plugin).ready).params.values()];
+// (by instance name: a pattern's id, or the plugin's name; loads the plugin by that name if needed)
+export const clapParams = async (name) => [...(await getStream(name, streams.get(name)?.plugin ?? name).ready).params.values()];
 
 // the CLAP plugins the desktop app can load, by name
 export const clapPlugins = () => Invoke('clap_plugins');
@@ -330,6 +351,8 @@ export const unloadClap = async (plugin) => {
   const stream = streams.get(plugin);
   streams.delete(plugin);
   nativeStates.delete(plugin);
+  nativeParams.delete(plugin);
+  nativePlugins.delete(plugin);
   stream?.ready.then(({ player }) => player.disconnect()).catch(() => {});
   return Invoke('clap_unload', { plugin });
 };

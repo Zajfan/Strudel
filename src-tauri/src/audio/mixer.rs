@@ -12,7 +12,7 @@ use std::time::{ Duration, Instant };
 
 use serde::Deserialize;
 
-use super::plugins::{ host_gui, load_plugin, load_state, save_state, wait_unloaded, Loaded, NewSlot, NoteEvent, ParamDesc, Slot, BLOCK, CHANNELS };
+use super::plugins::{ gui_title, host_gui, load_plugin, load_state, save_state, wait_unloaded, Loaded, NewSlot, NoteEvent, ParamDesc, Slot, BLOCK, CHANNELS };
 
 #[derive(Deserialize)]
 pub struct MixNote {
@@ -59,6 +59,8 @@ struct Inner {
   commands: Sender<Command>,
   // the live plugins by name (one instance each); export renders load their own instances, by index only
   plugins: HashMap<String, usize>,
+  // which plugin each index is
+  names: HashMap<usize, String>,
   // per plugin index: the sample rate it was loaded for (the page's, or an export's)
   rates: HashMap<usize, f64>,
   params: HashMap<usize, Vec<ParamDesc>>,
@@ -146,36 +148,54 @@ fn render_thread(commands: Receiver<Command>) {
 }
 
 impl MixerEngine {
-  // Loads a plugin for the given sample rate (the page's) and returns its index. If it was loaded
-  // for another rate (a new AudioContext), it is reloaded at the new one.
+  // Loads a plugin under its own name for the given sample rate (the page's), see load_as.
   pub fn load(&self, plugin: &str, sample_rate: f64) -> Result<usize, String> {
+    self.load_as(plugin, plugin, sample_rate)
+  }
+
+  // Loads a plugin as the live instance `name` for the given sample rate (the page's) and returns its
+  // index. If it was loaded for another rate (a new AudioContext), it is reloaded at the new one, as
+  // it was; an instance of another plugin by that name is replaced.
+  pub fn load_as(&self, name: &str, plugin: &str, sample_rate: f64) -> Result<usize, String> {
     let loaded = {
       let guard = self.inner.lock().unwrap();
-      guard.as_ref().and_then(|inner| inner.plugins.get(plugin).map(|&i| (i, inner.rates.get(&i) == Some(&sample_rate))))
+      guard.as_ref().and_then(|inner| {
+        let index = *inner.plugins.get(name)?;
+        let same_plugin = inner.names.get(&index).map_or(false, |p| p == plugin);
+        Some((index, same_plugin, inner.rates.get(&index) == Some(&sample_rate)))
+      })
     };
-    // reloaded at the new rate as it was (its patch, GUI tweaks)
-    let mut state = None;
-    match loaded {
-      Some((index, true)) => return Ok(index),
-      Some((index, false)) => {
-        state = self.state(index).ok();
-        self.unload_index(index)?;
-      }
-      None => {}
+    if let Some((index, true, true)) = loaded {
+      return Ok(index);
     }
+    // the new instance first: if it can't load, the old one stays
     let index = self.add(plugin, sample_rate)?;
-    if let Some(state) = state {
-      self.set_state(index, &state)?;
+    if let Some((old, same_plugin, _)) = loaded {
+      if same_plugin {
+        if let Ok(state) = self.state(old) {
+          self.set_state(index, &state)?;
+        }
+      }
+      self.unload_index(old)?;
     }
-    self.inner.lock().unwrap().as_mut().ok_or("no plugins loaded")?.plugins.insert(plugin.to_string(), index);
+    self.inner.lock().unwrap().as_mut().ok_or("no plugins loaded")?.plugins.insert(name.to_string(), index);
     Ok(index)
   }
 
-  // Loads a new instance of a plugin, apart from the live one (for an export), and returns its index.
-  // It starts as the live one is, if that is loaded (its patch, GUI tweaks).
+  // Loads a new instance of a plugin, apart from the live ones (for an export), and returns its index.
+  // It starts as the live instance `name` is, if that is loaded and the same plugin (its patch, GUI
+  // tweaks).
   pub fn load_instance(&self, plugin: &str, sample_rate: f64) -> Result<usize, String> {
+    self.load_instance_of(plugin, plugin, sample_rate)
+  }
+
+  pub fn load_instance_of(&self, name: &str, plugin: &str, sample_rate: f64) -> Result<usize, String> {
     let index = self.add(plugin, sample_rate)?;
-    if let Some(live) = self.index_of(plugin) {
+    let live = {
+      let guard = self.inner.lock().unwrap();
+      guard.as_ref().and_then(|inner| inner.plugins.get(name).copied().filter(|i| inner.names.get(i).map_or(false, |p| p == plugin)))
+    };
+    if let Some(live) = live {
       if let Ok(state) = self.state(live) {
         self.set_state(index, &state)?;
       }
@@ -205,6 +225,7 @@ impl MixerEngine {
       Inner {
         commands,
         plugins: HashMap::new(),
+        names: HashMap::new(),
         rates: HashMap::new(),
         params: HashMap::new(),
         unloaded: HashMap::new(),
@@ -218,6 +239,7 @@ impl MixerEngine {
     inner.host_ids.insert(index, id);
     inner.unloaded.insert(index, unloaded);
     inner.rates.insert(index, sample_rate);
+    inner.names.insert(index, plugin.to_string());
     inner.params.insert(index, slot.layout.params.clone());
     inner.commands.send(Command::Add(slot)).map_err(|e| e.to_string())?;
     Ok(index)
@@ -253,9 +275,11 @@ impl MixerEngine {
       let Some(index) = inner.plugins.get(plugin) else {
         return Ok(false);
       };
-      *inner.host_ids.get(index).ok_or("no id for this plugin")?
+      let id = *inner.host_ids.get(index).ok_or("no id for this plugin")?;
+      (id, inner.names.get(index).cloned().unwrap_or_default())
     };
-    host_gui(id, &format!("{} - Strudel", plugin), show)?;
+    let (id, name) = id;
+    host_gui(id, &gui_title(plugin, &name), show)?;
     Ok(true)
   }
 
@@ -320,6 +344,7 @@ impl MixerEngine {
       }
       inner.plugins.retain(|_, i| *i != index);
       inner.params.remove(&index);
+      inner.names.remove(&index);
       inner.host_ids.remove(&index);
       inner.commands.send(Command::Remove(index)).map_err(|e| e.to_string())?;
       inner.unloaded.remove(&index)
@@ -471,6 +496,42 @@ mod tests {
     assert!(restored > 0.01, "no sound after loading the default state");
     assert!(muted < restored / 10.0, "the export instance didn't get the live state");
     assert!(mixer.set_state(export, "not a state").is_err());
+    mixer.reset();
+  }
+
+  #[test]
+  fn hosts_instances_of_one_plugin_by_name() {
+    let names = super::super::plugins::plugin_names();
+    if !["Surge XT", "Surge XT Effects"].iter().all(|p| names.iter().any(|n| n == p)) {
+      println!("Surge XT or Surge XT Effects missing, skipping");
+      return;
+    }
+    let sr = 48000.0;
+    let mixer = MixerEngine::default();
+    let rms_of_a_note = |index: usize| {
+      mixer.notes(index, vec![MixNote { time: 0.05, duration: 0.3, key: 60, velocity: 0.8 }]).unwrap();
+      let bytes = mixer.render(index, 0, 19200).unwrap();
+      let left: Vec<f32> = bytes.chunks_exact(8).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect();
+      (left.iter().map(|s| s * s).sum::<f32>() / left.len() as f32).sqrt()
+    };
+    let bass = mixer.load_as("bass", "Surge XT", sr).unwrap();
+    let lead = mixer.load_as("lead", "Surge XT", sr).unwrap();
+    assert_ne!(bass, lead);
+    assert_eq!(mixer.load_as("bass", "Surge XT", sr).unwrap(), bass);
+    assert_eq!(mixer.loaded(), vec!["bass".to_string(), "lead".to_string()]);
+    // one instance muted: the other is not
+    let volume = mixer.param_list(bass).unwrap().into_iter().find(|p| p.name.eq_ignore_ascii_case("Global Volume")).unwrap();
+    mixer.params(bass, vec![MixParam { time: 0.0, id: volume.id, value: volume.min }]).unwrap();
+    let (bass_rms, lead_rms) = (rms_of_a_note(bass), rms_of_a_note(lead));
+    println!("bass {} lead {}", bass_rms, lead_rms);
+    assert!(lead_rms > 0.01 && bass_rms < lead_rms / 10.0);
+    // an export's instance of "bass" starts as bass is
+    let export = mixer.load_instance_of("bass", "Surge XT", sr).unwrap();
+    assert!(rms_of_a_note(export) < lead_rms / 10.0);
+    mixer.unload_index(export).unwrap();
+    // "bass" as a plugin that can't load (an effect) leaves it as it was
+    assert!(mixer.load_as("bass", "Surge XT Effects", sr).is_err());
+    assert_eq!(mixer.index_of("bass"), Some(bass));
     mixer.reset();
   }
 }

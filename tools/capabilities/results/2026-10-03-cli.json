@@ -1,0 +1,451 @@
+{
+  "tier": "cli",
+  "date": "2026-10-03",
+  "node": "v22.21.1",
+  "platform": "linux-x64",
+  "results": {
+    "ARR-1": {
+      "status": "pass",
+      "metrics": {
+        "sections": 8,
+        "bars": 64,
+        "candidates": [
+          {
+            "name": "arrange()",
+            "eventsInSong": 64,
+            "wrongSection": 0,
+            "eventsAfterEnd": 8
+          },
+          {
+            "name": "arrange().once()",
+            "eventsInSong": 64,
+            "wrongSection": 0,
+            "eventsAfterEnd": 0
+          },
+          {
+            "name": "arrange() + filterWhen(t < 64)",
+            "eventsInSong": 64,
+            "wrongSection": 0,
+            "eventsAfterEnd": 0
+          },
+          {
+            "name": "arrange() + silence tail",
+            "eventsInSong": 64,
+            "wrongSection": 0,
+            "eventsAfterEnd": 0
+          }
+        ],
+        "headline": "8 sections, 64 bars via arrange().once()"
+      },
+      "notes": {
+        "construct": "arrange().once()"
+      },
+      "run": {
+        "ranAt": "2026-10-02T04:12:20.946Z",
+        "commit": "0629d1cc",
+        "dirty": true,
+        "source": "probe",
+        "node": "v22.21.1",
+        "platform": "linux-x64",
+        "thresholds": {}
+      }
+    },
+    "MIX-1": {
+      "status": "pass",
+      "metrics": {
+        "events": 4,
+        "orbits": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "stemRms": {
+          "1": 0.03374169340231597,
+          "2": 0,
+          "3": 0.005787515343304319,
+          "4": 0.0005034824551752867
+        },
+        "sendReturnRms": 0.010767939008727717,
+        "otherBusInSendWindow": 0,
+        "duckDb": 33.4816388837026,
+        "headline": "4 buses, send return 0.011 rms, 33.5 dB duck"
+      },
+      "notes": {
+        "engine": "supradough",
+        "buses": "orbits",
+        "send": "delay on orbit 3",
+        "sidechain": "duckorbit from orbit 2 to orbit 1"
+      },
+      "run": {
+        "ranAt": "2026-10-02T10:25:16.017Z",
+        "commit": "a116a81d",
+        "dirty": true,
+        "source": "probe",
+        "node": "v22.21.1",
+        "platform": "linux-x64",
+        "thresholds": {
+          "minDuckDb": 6
+        }
+      }
+    },
+    "AUT-1": {
+      "status": "pass",
+      "metrics": {
+        "events": 16,
+        "maxErrorMs": 0.08333333333333333,
+        "increasing": true,
+        "onsets": [
+          {
+            "expected": 0,
+            "found": 4,
+            "errorMs": 0.08333333333333333
+          },
+          {
+            "expected": 3000,
+            "found": 3003,
+            "errorMs": 0.0625
+          },
+          {
+            "expected": 6000,
+            "found": 6003,
+            "errorMs": 0.0625
+          },
+          {
+            "expected": 9000,
+            "found": 9002,
+            "errorMs": 0.041666666666666664
+          },
+          {
+            "expected": 12000,
+            "found": 12002,
+            "errorMs": 0.041666666666666664
+          },
+          {
+            "expected": 15000,
+            "found": 15002,
+            "errorMs": 0.041666666666666664
+          },
+          {
+            "expected": 18000,
+            "found": 18002,
+            "errorMs": 0.041666666666666664
+          },
+          {
+            "expected": 21000,
+            "found": 21002,
+            "errorMs": 0.041666666666666664
+          },
+          {
+            "expected": 24000,
+            "found": 24002,
+            "errorMs": 0.041666666666666664
+          },
+          {
+            "expected": 27000,
+            "found": 27001,
+            "errorMs": 0.020833333333333332
+          },
+          {
+            "expected": 30000,
+            "found": 30001,
+            "errorMs": 0.020833333333333332
+          },
+          {
+            "expected": 33000,
+            "found": 33001,
+            "errorMs": 0.020833333333333332
+          },
+          {
+            "expected": 36000,
+            "found": 36001,
+            "errorMs": 0.020833333333333332
+          },
+          {
+            "expected": 39000,
+            "found": 39001,
+            "errorMs": 0.020833333333333332
+          },
+          {
+            "expected": 42000,
+            "found": 42001,
+            "errorMs": 0.020833333333333332
+          },
+          {
+            "expected": 45000,
+            "found": 45001,
+            "errorMs": 0.020833333333333332
+          }
+        ],
+        "ramp": {
+          "maxErrorMs": 0.11006981562635317,
+          "windows": 960
+        },
+        "headline": "0.083 ms stepped, 0.110 ms ramp"
+      },
+      "notes": {
+        "resolution": "onset timing of 16 stepped values per cycle; ramp timing per 1 ms period of a 1 kHz tone",
+        "ramp": "gain automated 0.1 -> 1 over one held note with auto(saw.range(0.1, 1))"
+      },
+      "run": {
+        "ranAt": "2026-10-02T10:37:59.149Z",
+        "commit": "bee69eee",
+        "dirty": true,
+        "source": "probe",
+        "node": "v22.21.1",
+        "platform": "linux-x64",
+        "thresholds": {
+          "maxErrorMs": 1
+        }
+      }
+    },
+    "EXP-1": {
+      "status": "pass",
+      "metrics": {
+        "events": 1115,
+        "rms": 0.09017486756576179,
+        "lengthSamples": 3120000,
+        "expectedLength": 3120000,
+        "wav": {
+          "channels": 2,
+          "sampleRate": 48000,
+          "bitsPerSample": 16,
+          "bytes": 12480044
+        },
+        "wavIdentical": true,
+        "firstDifferenceLeft": -1,
+        "firstDifferenceRight": -1,
+        "headline": "65 s WAV, byte-identical"
+      },
+      "notes": {},
+      "run": {
+        "ranAt": "2026-10-02T04:43:38.802Z",
+        "commit": "3dc3478e",
+        "dirty": true,
+        "source": "probe",
+        "node": "v22.21.1",
+        "platform": "linux-x64",
+        "thresholds": {
+          "minRms": 0.001
+        }
+      }
+    },
+    "EXP-2": {
+      "status": "pass",
+      "metrics": {
+        "stemApis": [
+          "supradough.renderDoughStems"
+        ],
+        "orbits": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "stemRms": {
+          "1": 0.011400375815970346,
+          "2": 0.013070353403176077,
+          "3": 0.005092448447371626,
+          "4": 0.001785799028330401
+        },
+        "residualDbfs": -168.85256326154212,
+        "headline": "4 stems, residual -168.9 dBFS"
+      },
+      "notes": {
+        "reference": "renderDough render of the same pattern",
+        "scope": "left channels compared"
+      },
+      "run": {
+        "ranAt": "2026-10-02T04:40:00.343Z",
+        "commit": "3dc3478e",
+        "dirty": true,
+        "source": "probe",
+        "node": "v22.21.1",
+        "platform": "linux-x64",
+        "thresholds": {
+          "maxResidualDbfs": -60
+        }
+      }
+    },
+    "PERF-1": {
+      "status": "pass",
+      "metrics": {
+        "events": 1115,
+        "audioSeconds": 65,
+        "renderSeconds": 15.316375906000001,
+        "realtimeFactor": 4.24382376085044,
+        "headline": "4.2x real time"
+      },
+      "notes": {},
+      "run": {
+        "ranAt": "2026-10-02T10:38:14.733Z",
+        "commit": "bee69eee",
+        "dirty": true,
+        "source": "probe",
+        "node": "v22.21.1",
+        "platform": "linux-x64",
+        "thresholds": {
+          "minRealtimeFactor": 4
+        }
+      }
+    },
+    "PLUG-1": {
+      "status": "pass",
+      "metrics": {
+        "exitCode": 0,
+        "seconds": 0,
+        "plugin": "~/.clap/Surge XT.clap",
+        "patternEvents": 8,
+        "pluginId": "org.surge-synth-team.surge-xt",
+        "pluginName": "Surge XT",
+        "frames": 72000,
+        "rms": 0.08375910361552605,
+        "peak": 0.42798396944999695,
+        "eventsDelivered": 8,
+        "headline": "Surge XT via clack-host"
+      },
+      "notes": {
+        "pattern": "note(\"c4 e4 g4 c5\")"
+      },
+      "run": {
+        "ranAt": "2026-10-02T17:59:51.039Z",
+        "commit": "ad5984f7",
+        "dirty": true,
+        "source": "probe",
+        "node": "v22.21.1",
+        "platform": "linux-x64",
+        "thresholds": {
+          "timeoutMs": 1200000,
+          "minRms": 0.001
+        }
+      }
+    },
+    "SYNC-1": {
+      "status": "pass",
+      "metrics": {
+        "ticks": 1435,
+        "spanSeconds": 59.749925673999996,
+        "longestGapMs": 41.896874999999454,
+        "measuredTicks": 1410,
+        "expectedIntervalMs": 41.666666666666664,
+        "intervalMs": 41.666668937702774,
+        "maxJitterMs": 0.22373906584562064,
+        "rmsJitterMs": 0.0520532131682021,
+        "headline": "0.224 ms max jitter over 1410 ticks"
+      },
+      "notes": {
+        "route": "strudel play: setcps(0.5); midicmd(\"clock*48\").midi('Midi Through Port-0');  -> ALSA 14:0 -> aseqdump"
+      },
+      "run": {
+        "ranAt": "2026-10-03T07:35:13.356Z",
+        "commit": "51549fcb",
+        "dirty": true,
+        "source": "probe",
+        "node": "v22.21.1",
+        "platform": "linux-x64",
+        "thresholds": {
+          "maxJitterMs": 2
+        }
+      }
+    },
+    "TUNE-1": {
+      "status": "pass",
+      "metrics": {
+        "cases": [
+          {
+            "name": "19-EDO",
+            "count": 19,
+            "maxCents": 2.952118335527637e-7
+          },
+          {
+            "name": "12-tone just intonation",
+            "count": 12,
+            "maxCents": 2.459139827002702e-7
+          }
+        ],
+        "renderedFreq": 284.0066237181327,
+        "renderedCents": 0.0000010344708600954119,
+        "maxCents": 0.0000010344708600954119,
+        "headline": "max 0.000 cents"
+      },
+      "notes": {},
+      "run": {
+        "ranAt": "2026-09-29T12:17:18.424Z",
+        "commit": "96df6ef6",
+        "dirty": true,
+        "source": "probe",
+        "node": "v22.21.1",
+        "platform": "linux-x64",
+        "thresholds": {
+          "maxCents": 1
+        }
+      }
+    },
+    "LANG-1": {
+      "status": "pass",
+      "metrics": {
+        "cases": [
+          {
+            "name": "syntax",
+            "message": "Unexpected token (3:12)",
+            "expected": {
+              "line": 3,
+              "column": 12
+            },
+            "reported": {
+              "line": 3,
+              "column": 12,
+              "source": "loc"
+            },
+            "exact": true
+          },
+          {
+            "name": "unknown function",
+            "message": "note(...).s(...).notAFunction is not a function (3:3)",
+            "expected": {
+              "line": 3,
+              "column": 3
+            },
+            "reported": {
+              "line": 3,
+              "column": 3,
+              "source": "loc"
+            },
+            "exact": true
+          }
+        ],
+        "exact": 2,
+        "headline": "2/2 exact"
+      },
+      "notes": {},
+      "run": {
+        "ranAt": "2026-10-02T04:00:42.729Z",
+        "commit": "845fe328",
+        "dirty": true,
+        "source": "probe",
+        "node": "v22.21.1",
+        "platform": "linux-x64",
+        "thresholds": {}
+      }
+    },
+    "BUILD-0": {
+      "status": "pass",
+      "metrics": {
+        "node": "v22.21.1",
+        "events": 3,
+        "rms": 0.12695920809583505,
+        "headline": "node v22.21.1"
+      },
+      "notes": {},
+      "run": {
+        "ranAt": "2026-09-29T12:17:18.424Z",
+        "commit": "96df6ef6",
+        "dirty": true,
+        "source": "probe",
+        "node": "v22.21.1",
+        "platform": "linux-x64",
+        "thresholds": {}
+      }
+    }
+  }
+}

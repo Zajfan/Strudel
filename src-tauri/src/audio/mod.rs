@@ -64,8 +64,8 @@ pub fn engine_start(device: Option<String>, engine: State<'_, PluginEngine>) -> 
 }
 
 #[tauri::command]
-pub fn clap_play(plugin: String, notes: Vec<NoteFromJs>, engine: State<'_, PluginEngine>) -> Result<(), String> {
-  engine.play(&plugin, notes)
+pub fn clap_play(plugin: String, notes: Vec<NoteFromJs>, instance: Option<String>, engine: State<'_, PluginEngine>) -> Result<(), String> {
+  engine.play_as(instance.as_deref().unwrap_or(&plugin), &plugin, notes)
 }
 
 #[tauri::command]
@@ -107,8 +107,8 @@ pub fn clap_unload(plugin: String, engine: State<'_, PluginEngine>, mixer: State
 // ------------------------------------------------------------------ plugins in the page's mixer
 
 #[tauri::command]
-pub fn mix_load(plugin: String, sample_rate: f64, mixer: State<'_, MixerEngine>) -> Result<usize, String> {
-  mixer.load(&plugin, sample_rate)
+pub fn mix_load(plugin: String, sample_rate: f64, instance: Option<String>, mixer: State<'_, MixerEngine>) -> Result<usize, String> {
+  mixer.load_as(instance.as_deref().unwrap_or(&plugin), &plugin, sample_rate)
 }
 
 // A loaded plugin's state (patch, GUI tweaks) as text for a pattern, from the mixer or else the native
@@ -143,8 +143,8 @@ pub fn mix_set_state(plugin: usize, state: String, mixer: State<'_, MixerEngine>
 
 // a separate instance of a plugin, for an export (offline render); unloaded with mix_unload
 #[tauri::command]
-pub fn mix_load_instance(plugin: String, sample_rate: f64, mixer: State<'_, MixerEngine>) -> Result<usize, String> {
-  mixer.load_instance(&plugin, sample_rate)
+pub fn mix_load_instance(plugin: String, sample_rate: f64, instance: Option<String>, mixer: State<'_, MixerEngine>) -> Result<usize, String> {
+  mixer.load_instance_of(instance.as_deref().unwrap_or(&plugin), &plugin, sample_rate)
 }
 
 #[tauri::command]

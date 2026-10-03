@@ -612,6 +612,15 @@ pub(crate) fn load_plugin(name: &str, index: usize, sample_rate: f64) -> Result<
 }
 
 // Shows or hides a loaded plugin's GUI, and waits for the answer.
+// a plugin window's title: "Surge XT - Strudel", or "bass: Surge XT - Strudel" for an instance by id
+pub(crate) fn gui_title(name: &str, plugin: &str) -> String {
+  if name == plugin || plugin.is_empty() {
+    format!("{} - Strudel", name)
+  } else {
+    format!("{}: {} - Strudel", name, plugin)
+  }
+}
+
 pub(crate) fn host_gui(id: u64, title: &str, show: bool) -> Result<(), String> {
   let (reply, answer) = channel();
   main_thread()
@@ -814,7 +823,10 @@ struct Running {
   stats: Arc<Stats>,
   capture: Arc<Mutex<Vec<f32>>>,
   capturing: Arc<AtomicBool>,
+  // loaded plugins by instance name (a pattern's id, or else the plugin's name), and which plugin
+  // each index is
   plugins: HashMap<String, usize>,
+  names: HashMap<usize, String>,
   next_index: usize,
 }
 
@@ -1010,6 +1022,7 @@ impl PluginEngine {
       capture,
       capturing,
       plugins: HashMap::new(),
+      names: HashMap::new(),
       next_index: 0,
     });
     Ok(())
@@ -1045,6 +1058,7 @@ impl PluginEngine {
       let index = running.plugins.remove(plugin).ok_or_else(|| format!("\"{}\" is not loaded", plugin))?;
       running.commands.push(AudioCommand::Remove(index)).map_err(|_| "the audio thread is busy".to_string())?;
       running.host_ids.remove(&index);
+      running.names.remove(&index);
       running.unloaded.remove(&index)
     };
     if let Some(unloaded) = unloaded {
@@ -1072,34 +1086,59 @@ impl PluginEngine {
       };
       *running.host_ids.get(index).ok_or("no id for this plugin")?
     };
-    host_gui(id, &format!("{} - Strudel", plugin), show)?;
+    host_gui(id, &gui_title(plugin, &self.plugin_of(plugin).unwrap_or_default()), show)?;
     Ok(true)
   }
 
   // Moves the engine to another output device, reloading the plugins that were loaded.
   pub fn set_device(&self, device: Option<String>) -> Result<(), String> {
     // the plugins come back as they were (patch, GUI tweaks)
-    let plugins: Vec<(String, Option<String>)> =
-      self.loaded().into_iter().map(|p| { let state = self.host_id(&p).and_then(|id| save_state(id).ok()); (p, state) }).collect();
+    let plugins: Vec<(String, String, Option<String>)> = self
+      .loaded()
+      .into_iter()
+      .filter_map(|name| {
+        let plugin = self.plugin_of(&name)?;
+        let state = self.host_id(&name).and_then(|id| save_state(id).ok());
+        Some((name, plugin, state))
+      })
+      .collect();
     self.stop();
     self.start(device)?;
-    for (plugin, state) in plugins {
-      self.load(&plugin)?;
-      if let (Some(state), Some(id)) = (state, self.host_id(&plugin)) {
+    for (name, plugin, state) in plugins {
+      self.load_as(&name, &plugin)?;
+      if let (Some(state), Some(id)) = (state, self.host_id(&name)) {
         load_state(id, &state)?;
       }
     }
     Ok(())
   }
 
-  // Loads a plugin (once) and returns its index.
+  // which plugin an instance is
+  fn plugin_of(&self, name: &str) -> Option<String> {
+    let guard = self.running.lock().unwrap();
+    let running = guard.as_ref()?;
+    running.names.get(running.plugins.get(name)?).cloned()
+  }
+
+  // Loads a plugin (once) under its own name and returns its index.
   pub fn load(&self, plugin: &str) -> Result<usize, String> {
+    self.load_as(plugin, plugin)
+  }
+
+  // Loads a plugin as the instance `name` (once) and returns its index. An instance of another plugin
+  // by that name is replaced.
+  pub fn load_as(&self, name: &str, plugin: &str) -> Result<usize, String> {
     if self.running.lock().unwrap().is_none() {
       self.start(None)?;
     }
+    if self.plugin_of(name).map_or(false, |p| p != plugin) {
+      // a swap: only once the new plugin is found
+      find_plugin(plugin)?;
+      self.unload(name)?;
+    }
     let mut guard = self.running.lock().unwrap();
     let running = guard.as_mut().ok_or("the plugin engine is not running")?;
-    if let Some(&index) = running.plugins.get(plugin) {
+    if let Some(&index) = running.plugins.get(name) {
       return Ok(index);
     }
     let index = running.next_index;
@@ -1109,7 +1148,8 @@ impl PluginEngine {
     running.host_ids.insert(index, id);
     running.unloaded.insert(index, unloaded);
     running.commands.push(AudioCommand::Add(slot)).map_err(|_| "the audio thread is busy".to_string())?;
-    running.plugins.insert(plugin.to_string(), index);
+    running.plugins.insert(name.to_string(), index);
+    running.names.insert(index, plugin.to_string());
     Ok(index)
   }
 
@@ -1135,7 +1175,12 @@ impl PluginEngine {
   }
 
   pub fn play(&self, plugin: &str, notes: Vec<NoteFromJs>) -> Result<(), String> {
-    let index = self.load(plugin)?;
+    self.play_as(plugin, plugin, notes)
+  }
+
+  // Plays notes on the instance `name` of a plugin, loading it first if needed.
+  pub fn play_as(&self, name: &str, plugin: &str, notes: Vec<NoteFromJs>) -> Result<(), String> {
+    let index = self.load_as(name, plugin)?;
     let mut guard = self.running.lock().unwrap();
     let running = guard.as_mut().ok_or("the plugin engine is not running")?;
     for note in notes {

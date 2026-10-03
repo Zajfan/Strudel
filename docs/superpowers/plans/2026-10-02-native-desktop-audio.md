@@ -88,3 +88,9 @@ WebKitGTK (the desktop webview) cannot play to a second output device (no `setSi
   per state, in the mixer, on the native output and in exports). An export's instance starts as the
   live plugin is; a mixer plugin reloaded at a new sample rate, and the native output moved to
   another device, keep their state. Checked by a Rust test and desktop PLUG-1 (part 7).
+- Done 2026-10-03: several instances of one plugin. `.clap('Surge XT', { id: 'bass' })` loads an
+  instance named by its id (default: the plugin's name), with its own patch, state, parameters,
+  window and channel; clapGui, clapState, clapParams and unloadClap take the id. An id switched to
+  another plugin replaces the instance (the new one loads first, so a failed swap keeps the old).
+  Checked by a Rust test and the new PLUG-2 cell ("Plugin mixing", desktop), which also tracks
+  effect plugins and VST3 (still to do, so PLUG-2 fails for now).
