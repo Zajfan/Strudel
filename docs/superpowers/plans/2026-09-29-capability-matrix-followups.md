@@ -134,5 +134,8 @@ failure output: the messages are needed to find the cause.
 
 packages/cli/test/midi.test.mjs `sendAt > sends once the clock reaches the time, not before` failed
 once (sent 5.54 ms late, bound 5 ms) in a full run started right after `cargo test` runs, on a
-busy machine. Passed in the next 3 full runs. It measures a real setTimeout + spin on the wall
-clock, so heavy load can push it over; if it recurs on an idle machine, look at sendAt's spin.
+busy machine. Passed in the next 3 full runs, then failed again the same way (9.5 ms late). It
+measured a real setTimeout + spin on the wall clock while vitest runs test files in parallel, so a
+loaded machine wakes the timer late. Fixed 2026-10-03: the unit test now checks sendAt's logic on a
+controlled clock (fake timers; timer first, then the spin, sends at the time and not before), and
+real-clock precision stays measured where it belongs, by the CLI SYNC-1 probe (0.23 ms max jitter).

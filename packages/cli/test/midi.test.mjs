@@ -32,10 +32,31 @@ describe('sendAt', () => {
     expect(send).toHaveBeenCalledOnce();
   });
 
-  it('sends once the clock reaches the time, not before', async () => {
-    const start = performance.now();
-    const sentAt = await new Promise((resolve) => sendAt(start + 30, () => resolve(performance.now())));
-    expect(sentAt).toBeGreaterThanOrEqual(start + 30);
-    expect(sentAt - (start + 30)).toBeLessThan(5);
+  // On a controlled clock: a timer until shortly before the time, then the spin until the time.
+  // (How close to the time it sends on a real clock is measured by the CLI's SYNC-1 probe; here, on
+  // a machine loaded by parallel test files, a timer can wake up any number of ms late.)
+  it('waits with a timer, then sends once the clock reaches the time, not before', () => {
+    vi.useFakeTimers();
+    try {
+      let clock = 0;
+      const readings = [];
+      // each reading advances the clock a little, as spinning on a real one does
+      const now = () => {
+        readings.push(clock);
+        return (clock += 0.25);
+      };
+      const send = vi.fn(() => readings.push('sent'));
+      sendAt(30, send, now);
+      expect(send).not.toHaveBeenCalled();
+      // the timer runs out before the time, the spin takes it from there
+      clock = 28.5;
+      vi.runAllTimers();
+      expect(send).toHaveBeenCalledOnce();
+      const sentAfter = readings[readings.indexOf('sent') - 1];
+      expect(sentAfter).toBeGreaterThanOrEqual(29.75);
+      expect(sentAfter).toBeLessThan(30.25);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
