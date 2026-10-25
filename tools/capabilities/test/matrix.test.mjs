@@ -105,7 +105,7 @@ describe('capabilities.json', () => {
   it('is valid and contains the spec rows', () => {
     const real = loadCapabilities(fileURLToPath(new URL('../capabilities.json', import.meta.url)));
     expect(real.capabilities.map((c) => c.id)).toEqual([
-      'ARR-1', 'MIX-1', 'AUT-1', 'EXP-1', 'EXP-2', 'PERF-1', 'LIVE-1',
+      'ARR-1', 'MIX-1', 'AUT-1', 'EXP-1', 'EXP-2', 'PERF-1', 'SOAK-1', 'LIVE-1',
       'CUE-1', 'PLUG-1', 'PLUG-2', 'SYNC-1', 'TUNE-1', 'LANG-1', 'BUILD-0',
     ]);
   });

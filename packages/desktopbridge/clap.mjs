@@ -3,7 +3,7 @@
 // file name ("Surge XT" for "Surge XT.clap") in CLAP_PATH, ~/.clap, /usr/lib/clap and
 // /usr/lib64/clap, and loaded on first use. A stand-in for the VersaTone engine
 // (docs/superpowers/plans/2026-10-02-native-desktop-audio.md).
-import { Pattern, logger, noteToMidi } from '@strudel/core';
+import { Pattern, logger, noteToMidi, registerEvalHook } from '@strudel/core';
 import { getAudioContext, getExternalChannel, registerOfflineRenderer } from '@strudel/webaudio';
 import { Invoke, toEpochMs } from './utils.mjs';
 
@@ -77,9 +77,17 @@ function getStream(name, plugin = name) {
   if (stream?.audioContext === audioContext && stream.plugin === plugin) return stream;
   // another plugin by this name: its player goes
   stream?.ready.then(({ player }) => player.disconnect()).catch(() => {});
-  const ready = (async () => {
+  // the plugin, loaded: notes and parameters can go to it from here (they don't need the player)
+  const loaded = (async () => {
     const index = await Invoke('mix_load', { plugin, sampleRate: audioContext.sampleRate, instance: name });
     const params = new Map((await Invoke('mix_param_list', { plugin: index })).map((p) => [p.name.toLowerCase(), p]));
+    // state: the state last loaded from a pattern (see setState)
+    return { index, params, state: undefined, stateLoaded: Promise.resolve() };
+  })();
+  // ... and its player, playing it in the page
+  const ready = (async () => {
+    const instance = await loaded;
+    const { index } = instance;
     await loadPlayer(audioContext);
     const player = new AudioWorkletNode(audioContext, 'strudel-plugin-player', {
       numberOfInputs: 0,
@@ -97,10 +105,10 @@ function getStream(name, plugin = name) {
       }
     };
     player.connect(getExternalChannel(`clap:${name}`).input);
-    // state: the state last loaded from a pattern (see setState)
-    return { index, params, player, state: undefined, stateLoaded: Promise.resolve() };
+    instance.player = player;
+    return instance;
   })();
-  stream = { audioContext, plugin, ready };
+  stream = { audioContext, plugin, loaded, ready };
   streams.set(name, stream);
   return stream;
 }
@@ -152,7 +160,7 @@ function playInMixer(name, plugin, hap, cps, targetTime) {
   // (when the plugin's stream must carry the note: earlier, on an orbit with an effect plugin)
   const time = getExternalChannel(`clap:${name}`).update(hap.value, targetTime, cps, duration);
   getStream(name, plugin)
-    .ready.then(async (stream) => {
+    .loaded.then(async (stream) => {
       await setState(stream, hap.context.clapState);
       await sendToMixer(stream, hap.value, time, duration);
     })
@@ -301,7 +309,7 @@ Pattern.prototype.clap = function (pluginName, { output = 'mixer', gui = false, 
   const name = id ?? pluginName;
   const plugin = format ? `${format}:${pluginName}` : pluginName;
   const pattern = this.withHap((hap) =>
-    hap.setContext({ ...hap.context, offlineRenderer: 'clap', clapPlugin: plugin, clapName: name, clapState: state }),
+    hap.setContext({ ...hap.context, offlineRenderer: 'clap', clapPlugin: plugin, clapName: name, clapState: state, clapOutput: output }),
   );
   return pattern.onTrigger((hap, currentTime, cps, targetTime) => {
     hap.ensureObjectValue();
@@ -327,7 +335,7 @@ export const clapGui = (plugin, show = true) => Invoke('clap_gui', { plugin, sho
 
 // The parameters of a plugin that patterns can automate: [{ id, name, module, min, max, default }].
 // (by instance name: a pattern's id, or the plugin's name; loads the plugin by that name if needed)
-export const clapParams = async (name) => [...(await getStream(name, streams.get(name)?.plugin ?? name).ready).params.values()];
+export const clapParams = async (name) => [...(await getStream(name, streams.get(name)?.plugin ?? name).loaded).params.values()];
 
 // the CLAP plugins the desktop app can load, by name
 export const clapPlugins = () => Invoke('clap_plugins');
@@ -364,3 +372,28 @@ export const unloadClap = async (plugin) => {
   stream?.ready.then(({ player }) => player.disconnect()).catch(() => {});
   return Invoke('clap_unload', { plugin });
 };
+
+// Plugins load when their first note comes; a note that comes while it loads is dropped (too late to
+// be in time). So once code is evaluated, the plugins it plays in the next cycle start loading
+// before its first notes are scheduled.
+registerEvalHook({
+  ready({ pattern, cycle }) {
+    const seen = new Set();
+    let haps = [];
+    try {
+      haps = pattern.queryArc(Math.floor(cycle ?? 0), Math.floor(cycle ?? 0) + 1);
+    } catch {
+      return;
+    }
+    for (const hap of haps) {
+      const { clapPlugin: plugin, clapName: name, clapOutput: output } = hap.context ?? {};
+      if (!plugin || seen.has(name)) continue;
+      seen.add(name);
+      if (output === 'native') {
+        Invoke('clap_play', { plugin, notes: [], instance: name }).catch((err) => logger(`[clap] ${name}: ${err}`, 'error'));
+      } else {
+        getStream(name, plugin).ready.catch((err) => logger(`[clap] ${name}: ${err}`, 'error'));
+      }
+    }
+  },
+});

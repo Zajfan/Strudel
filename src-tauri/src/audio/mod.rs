@@ -175,6 +175,18 @@ pub fn mix_process(request: Request<'_>, mixer: State<'_, MixerEngine>) -> Resul
   Ok(Response::new(mixer.process(chain, start, input)?))
 }
 
+// the mixer's counters: notes dropped for coming too late to start in time
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MixStats {
+  late_notes: u64,
+}
+
+#[tauri::command]
+pub fn mix_stats() -> MixStats {
+  MixStats { late_notes: mixer::late_notes() }
+}
+
 // a separate instance of a plugin, for an export (offline render); unloaded with mix_unload
 #[tauri::command]
 pub fn mix_load_instance(plugin: String, sample_rate: f64, instance: Option<String>, mixer: State<'_, MixerEngine>) -> Result<usize, String> {

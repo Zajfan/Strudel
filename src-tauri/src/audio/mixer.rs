@@ -99,6 +99,15 @@ struct FrameNote {
   key: u8,
   velocity: f64,
   on: bool,
+  // how many frames late it may still start (later, it's dropped: out of time is worse than missing)
+  late_limit: i64,
+}
+
+// notes that came too late to start (see FrameNote::late_limit), e.g. while a plugin was loading
+static LATE_NOTES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+pub fn late_notes() -> u64 {
+  LATE_NOTES.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 enum Command {
@@ -175,7 +184,12 @@ fn render_thread(commands: Receiver<Command>) {
               if note.frame >= to {
                 return true;
               }
-              // a note for an earlier frame is played at once (it came too late to be exact)
+              // a note for an earlier frame is played at once (it came too late to be exact), or not at
+              // all when it's so late it would be heard out of time
+              if note.on && from - note.frame > note.late_limit {
+                LATE_NOTES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                return false;
+              }
               let offset = (note.frame - from).max(0) as u32;
               let event = NoteEvent { plugin, due: Instant::now(), key: note.key, velocity: note.velocity, on: note.on };
               block_notes.push((offset, event));
@@ -401,8 +415,10 @@ impl MixerEngine {
     for note in notes {
       let on = (note.time * sr).round() as i64;
       let off = ((note.time + note.duration) * sr).round() as i64;
-      frames.push(FrameNote { frame: on, key: note.key, velocity: note.velocity, on: true });
-      frames.push(FrameNote { frame: off.max(on + 1), key: note.key, velocity: 0.0, on: false });
+      // 20 ms late is still heard as on time
+      let late_limit = (0.02 * sr) as i64;
+      frames.push(FrameNote { frame: on, key: note.key, velocity: note.velocity, on: true, late_limit });
+      frames.push(FrameNote { frame: off.max(on + 1), key: note.key, velocity: 0.0, on: false, late_limit });
     }
     commands.send(Command::Notes(plugin, frames)).map_err(|e| e.to_string())
   }

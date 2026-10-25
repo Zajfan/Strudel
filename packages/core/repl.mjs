@@ -14,8 +14,9 @@ import { register, Pattern, isPattern, silence, stack } from './pattern.mjs';
 import { reset_state } from './impure.mjs';
 
 // Hooks for packages that keep state per evaluation (such as the desktop app's effect plugins):
-// before() when an evaluation starts, after({ pattern, cycle, cps }) when it succeeded and `pattern`
-// plays from now (cycle: the scheduler's current cycle). Returns a function that removes the hook.
+// before() when an evaluation starts; ready({ pattern, cycle, cps }) when it succeeded, just before
+// `pattern` is scheduled (state its first haps depend on goes here); after({ pattern, cycle, cps })
+// once it plays (cycle: the scheduler's current cycle). Returns a function that removes the hook.
 const evalHooks = new Set();
 export function registerEvalHook(hook) {
   evalHooks.add(hook);
@@ -449,6 +450,7 @@ export function repl({
       logger(`[eval] code updated`);
       // cleared before scheduling, so a query error from the first tick is not overwritten
       updateState({ schedulerError: undefined });
+      runEvalHooks('ready', { pattern, cycle: scheduler.now(), cps: scheduler.cps });
       pattern = await setPattern(pattern, autostart);
       updateState({
         miniLocations: meta?.miniLocations || [],
@@ -564,6 +566,7 @@ export function repl({
       logger(`[eval] code updated`);
       // cleared before scheduling, so a query error from the first tick is not overwritten
       updateState({ schedulerError: undefined });
+      runEvalHooks('ready', { pattern, cycle: scheduler.now(), cps: scheduler.cps });
       pattern = await setPattern(pattern, autostart);
       updateState({
         miniLocations: meta?.miniLocations || [],

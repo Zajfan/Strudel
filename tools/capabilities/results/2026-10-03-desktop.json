@@ -109,8 +109,8 @@
         "offline": "renderPatternStems of mixPattern(): buses are orbits, the send is a delay on orbit 3, the sidechain is duckorbit from orbit 2 to orbit 1"
       },
       "run": {
-        "ranAt": "2026-10-03T07:51:50.406Z",
-        "commit": "bb4849c8",
+        "ranAt": "2026-10-03T12:28:44.533Z",
+        "commit": "2953afee",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
@@ -417,45 +417,44 @@
       }
     },
     "CUE-1": {
-      "status": "fail",
+      "status": "pass",
       "metrics": {
         "mainOutput": {
-          "main": -41.80961498373772,
-          "cue": -98.51180263053328
+          "main": -41.83894098397002,
+          "cue": -96.53247294034153
         },
         "cueOutput": {
-          "main": -109.45535775064968,
-          "cue": -25.35328069214788
+          "main": -110.0455725684399,
+          "cue": -25.344992847814176
         },
-        "separationOnMainDb": 56.702187646795565,
-        "separationOnCueDb": 84.1020770585018,
+        "separationOnMainDb": 54.693531956371515,
+        "separationOnCueDb": 84.70057972062571,
         "deviceOutput": {
-          "main": -85.55325729785544,
-          "cue": -54.69796528371404
+          "main": -94.69228264858431,
+          "cue": -40.268849111207004
         },
-        "separationOnDeviceDb": 30.855292014141398,
+        "separationOnDeviceDb": 54.423433537377306,
         "deviceStats": {
           "sampleRate": 44100,
-          "underruns": 45,
+          "underruns": 9,
           "running": true,
-          "fillMs": 50.06802721088435,
+          "fillMs": 1.9954648526077097,
           "device": "strudel_null",
-          "framesPlayed": 134927,
-          "framesDropped": 0,
+          "framesPlayed": 126748,
+          "framesDropped": 5733,
           "channels": 2,
-          "framesRepeated": 943
+          "framesRepeated": 473
         },
-        "recordedSamples": 134656,
-        "headline": "cue 57 dB below main on the main output, main 84 dB below cue on the cue"
+        "recordedSamples": 134400,
+        "headline": "cue 55 dB below main on the main output, main 85 dB below cue on the cue"
       },
       "notes": {
         "code": "$: note(\"c3*4\").s(\"sine\").gain(0.3)\n$: note(\"a5*4\").s(\"sine\").gain(0.3).cue()",
-        "scope": "headless Chromium, one fake output device: the cue stream is verified, a second physical device is not",
-        "error": "the main pattern leaks into the device cue (30.9 dB)"
+        "scope": "headless Chromium, one fake output device: the cue stream is verified, a second physical device is not"
       },
       "run": {
-        "ranAt": "2026-10-03T07:52:17.772Z",
-        "commit": "bb4849c8",
+        "ranAt": "2026-10-03T12:27:40.467Z",
+        "commit": "2953afee",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
@@ -469,15 +468,15 @@
         "pluginNotes": 4,
         "referenceNotes": 4,
         "syncOffsetsMs": [
-          0.79,
-          1.18,
-          0.82,
-          1.04
+          0.11,
+          0.23,
+          -0.2,
+          0.02
         ],
-        "maxSyncOffsetMs": 1.179138321995465,
-        "pluginRms": 0.040430381333701484,
-        "masterRms": 0.05383708715143277,
-        "reverbTailGainDb": 92.37384313481301,
+        "maxSyncOffsetMs": 0.22675736961451248,
+        "pluginRms": 0.04052581644084812,
+        "masterRms": 0.05344911084571992,
+        "reverbTailGainDb": 97.99937869809608,
         "automatableParams": 598,
         "gui": {
           "width": 1141,
@@ -485,7 +484,7 @@
           "colours": 5071,
           "closed": true
         },
-        "automationDropDb": 157.1540204324855,
+        "automationDropDb": 154.89940670546795,
         "export": {
           "orbits": [
             1,
@@ -493,38 +492,38 @@
           ],
           "pluginStemNotes": 6,
           "offsetsMs": [
-            2.88,
-            0.54,
-            0.35,
+            1.58,
+            0.77,
+            1.42,
             0.88,
-            1.17,
-            1.35
+            0.38,
+            1.5
           ],
           "sineStemRms": 0.031134120806411116,
           "sineStemLeakRms": 0
         },
         "filters": {
-          "lpfDarkerDb": 14.85313505513298,
-          "hpfBrighterDb": 10.459640948216109,
-          "envelopeDropDb": 10.30588184169784
+          "lpfDarkerDb": 14.861459540351321,
+          "hpfBrighterDb": 10.453542066987433,
+          "envelopeDropDb": 10.592398210240294
         },
         "state": {
           "chars": 7698,
           "prefix": "clap1:",
           "differs": true,
-          "exportLikeLiveRms": 0.00023319221244064758,
-          "exportDefaultRms": 0.05860003223805252,
-          "exportMutedRms": 0.00023263567737017343
+          "exportLikeLiveRms": 0.0002326750868534228,
+          "exportDefaultRms": 0.05884316090321049,
+          "exportMutedRms": 0.00023433227028724118
         },
         "native": {
           "notes": 13,
           "lateNotes": 0,
           "device": "strudel_null",
-          "rms": 0.1006473549388628,
+          "rms": 0.09967917592697172,
           "paramChanges": 429,
           "loadedAfterUnload": []
         },
-        "headline": "Surge XT in the mixer: within 1.2 ms of the beat, room +92.4 dB, automation -157 dB, GUI 1141x711, export 6 notes within 2.9 ms, lpf -15 dB; native: 13 notes"
+        "headline": "Surge XT in the mixer: within 0.2 ms of the beat, room +98.0 dB, automation -155 dB, GUI 1141x711, export 6 notes within 1.6 ms, lpf -15 dB; native: 13 notes"
       },
       "notes": {
         "plugin": "Surge XT",
@@ -532,8 +531,8 @@
         "native": "setcps(1)\nnote(\"c4 e4 g4 c5\").clap('Surge XT', { output: 'native' })"
       },
       "run": {
-        "ranAt": "2026-10-03T10:59:35.890Z",
-        "commit": "d5a3a4eb",
+        "ranAt": "2026-10-03T12:28:16.340Z",
+        "commit": "2953afee",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
@@ -547,23 +546,23 @@
     "SYNC-1": {
       "status": "pass",
       "metrics": {
-        "ticks": 1446,
-        "spanSeconds": 60.206821233,
-        "startDelaySeconds": 0.1387002999999986,
-        "longestGapMs": 41.83819199999925,
-        "measuredTicks": 1421,
+        "ticks": 1449,
+        "spanSeconds": 60.274471598999995,
+        "startDelaySeconds": 0.22974374999999964,
+        "longestGapMs": 42.22224300000016,
+        "measuredTicks": 1423,
         "expectedIntervalMs": 41.666666666666664,
-        "intervalMs": 41.66613207966794,
-        "maxJitterMs": 0.8458984572389454,
-        "rmsJitterMs": 0.2662731724026876,
-        "headline": "0.846 ms max jitter over 1421 ticks"
+        "intervalMs": 41.66675494674717,
+        "maxJitterMs": 0.7219695095627685,
+        "rmsJitterMs": 0.1836050539630772,
+        "headline": "0.722 ms max jitter over 1423 ticks"
       },
       "notes": {
         "route": "midicmd(\"clock*48\").midi('Midi Through Port-0') at 0.5 cps -> Rust midibridge -> ALSA 14:0 -> aseqdump"
       },
       "run": {
-        "ranAt": "2026-10-02T17:59:32.471Z",
-        "commit": "ad5984f7",
+        "ranAt": "2026-10-03T12:29:52.454Z",
+        "commit": "2953afee",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
@@ -679,11 +678,11 @@
       }
     },
     "PLUG-2": {
-      "status": "pass",
+      "status": "fail",
       "metrics": {
         "instances": {
-          "bassStemRms": 0.0001623282725077323,
-          "leadStemRms": 0.04133685283817923,
+          "bassStemRms": 0.000163781225824825,
+          "leadStemRms": 0.0413202570208328,
           "loaded": [
             "bass",
             "lead"
@@ -691,11 +690,10 @@
           "bassParams": 598
         },
         "vst3": {
-          "notes": 4,
+          "notes": 3,
           "syncMs": [
-            1.22,
-            0.63,
-            1.84
+            0.95,
+            0.98
           ],
           "statePrefix": "vst3:",
           "stateChars": 7917,
@@ -706,8 +704,8 @@
             "closed": true
           },
           "native": {
-            "notes": 13,
-            "lateNotes": 1,
+            "notes": 12,
+            "lateNotes": 2,
             "lateBlocks": 1,
             "plugins": [
               "vn"
@@ -719,61 +717,79 @@
           }
         },
         "effects": {
-          "insertLatencyMs": 34.82993197278911,
-          "orbit2LatencyMs": 69.65986394557822,
+          "insertLatencyMs": 43.53741496598639,
+          "orbit2LatencyMs": 87.07482993197279,
           "notes": {
             "fx": 5,
             "dry": 5
           },
           "syncMs": [
             0.05,
-            0.05,
-            0.05,
-            0.05,
-            0.05
+            0.18,
+            0.18,
+            0.18,
+            0.18
           ],
           "masterLagMs": [
-            34.88,
-            34.88,
-            34.88,
-            34.88,
-            34.88
+            43.54,
+            44.2,
+            44.2,
+            44.2,
+            44.2
           ],
           "tail": {
-            "fx": 0.0025053426702351562,
+            "fx": 0.0020041478323485464,
             "dry": 0
           },
           "fxStats": {
             "orbit 2": {
-              "frames": 190464,
-              "lateBySecond": [],
-              "lateAt": [],
-              "lateFrames": 0,
+              "frames": 190080,
+              "lateBySecond": [
+                6
+              ],
+              "lateAt": [
+                9088,
+                9216,
+                9344,
+                9472,
+                9600,
+                9728
+              ],
+              "lateFrames": 768,
               "maxAgeFrames": [
+                1792,
                 1408,
-                640,
-                768,
-                896,
-                768
+                1152,
+                1152,
+                1024
               ]
             },
             "roundTripsMs": [
-              25,
-              5,
+              6,
               13,
-              7
+              12,
+              12
             ],
             "master": {
-              "frames": 190464,
-              "lateBySecond": [],
-              "lateAt": [],
-              "lateFrames": 0,
+              "frames": 190080,
+              "lateBySecond": [
+                6
+              ],
+              "lateAt": [
+                9088,
+                9216,
+                9344,
+                9472,
+                9600,
+                9728
+              ],
+              "lateFrames": 768,
               "maxAgeFrames": [
+                1792,
                 1408,
-                640,
-                768,
-                896,
-                768
+                1280,
+                1152,
+                896
               ]
             }
           },
@@ -788,25 +804,26 @@
             3
           ],
           "tail": {
-            "fx": 0.005175386919595091,
+            "fx": 0.005419477757272321,
             "dry": 0
           },
-          "fxRms": 0.03128608617484052,
+          "fxRms": 0.03180389833571457,
           "changing": {
             "withFx": 0.0017857221288341508,
             "withoutFx": 0
           }
         },
         "pending": [],
-        "headline": "2 instances; effects within 0.1 ms after a 35 ms insert; VST3 within 1.8 ms, GUI 1141x711"
+        "headline": "2 instances; effects within 0.2 ms after a 44 ms insert; VST3 within 1.0 ms, GUI 1141x711"
       },
       "notes": {
         "plugin": "Surge XT",
-        "instances": "setcps(1)\n$: note(\"c3 ~ ~ ~\").clap('Surge XT', { id: 'bass' }).auto(0, { c: 'Global Volume' })\n$: note(\"e4 ~ ~ ~\").clap('Surge XT', { id: 'lead' }).orbit(2)"
+        "instances": "setcps(1)\n$: note(\"c3 ~ ~ ~\").clap('Surge XT', { id: 'bass' }).auto(0, { c: 'Global Volume' })\n$: note(\"e4 ~ ~ ~\").clap('Surge XT', { id: 'lead' }).orbit(2)",
+        "error": "effects: 1536 frames came back from Rust too late (played dry)"
       },
       "run": {
-        "ranAt": "2026-10-03T10:59:57.808Z",
-        "commit": "d5a3a4eb",
+        "ranAt": "2026-10-03T12:34:40.902Z",
+        "commit": "2953afee",
         "dirty": true,
         "source": "probe",
         "node": "v22.21.1",
@@ -814,6 +831,379 @@
         "thresholds": {
           "timeoutMs": 1200000,
           "minRms": 0.001
+        }
+      }
+    },
+    "SOAK-1": {
+      "status": "fail",
+      "metrics": {
+        "minutes": 20,
+        "memMb": {
+          "first": 663.8,
+          "last": 894.2,
+          "growthPerHour": 1095.4
+        },
+        "onsets": [
+          601,
+          600,
+          600
+        ],
+        "driftMs": [
+          0,
+          0.59,
+          0
+        ],
+        "jitterMs": [
+          0,
+          39.569,
+          0.136
+        ],
+        "memByProcess": {
+          "first": {
+            "tauri-driver": 3.265625,
+            "WebKitWebDriver": 16.9609375,
+            "app": 231.296875,
+            "WebKitNetworkPr": 59.390625,
+            "WebKitWebProces": 352.92578125
+          },
+          "last": {
+            "tauri-driver": 3.31640625,
+            "WebKitWebDriver": 17.01953125,
+            "app": 258.15625,
+            "WebKitNetworkPr": 59.640625,
+            "WebKitWebProces": 556.09765625
+          }
+        },
+        "spreadMs": {
+          "plugin": 41.97,
+          "effect": 0.14
+        },
+        "lateFrames": 2304,
+        "lateNotes": 1,
+        "startup": {
+          "lateFrames": 0,
+          "lateNotes": 1
+        },
+        "errors": 0,
+        "edits": 3,
+        "editErrors": [],
+        "exports": [
+          {
+            "minute": 15,
+            "ms": 1044,
+            "pluginRms": 0.04049
+          }
+        ],
+        "roundTripsMs": [
+          7,
+          5,
+          5,
+          7,
+          8,
+          9,
+          2,
+          6,
+          5,
+          9,
+          3,
+          5,
+          8,
+          7,
+          8,
+          4,
+          8,
+          9,
+          11,
+          3,
+          6,
+          9,
+          5,
+          9,
+          7,
+          9,
+          6,
+          4,
+          5,
+          9,
+          6,
+          9,
+          3,
+          8,
+          6,
+          9,
+          3,
+          6,
+          7,
+          4,
+          8,
+          4,
+          13,
+          6,
+          5,
+          5,
+          6,
+          9,
+          6,
+          3,
+          6,
+          6,
+          6,
+          4,
+          7,
+          8,
+          6,
+          5,
+          8,
+          7,
+          8,
+          6,
+          10,
+          9,
+          6,
+          6,
+          3,
+          5,
+          7,
+          6,
+          4,
+          8,
+          6,
+          6,
+          8,
+          6,
+          7,
+          7,
+          4,
+          9,
+          6,
+          8,
+          3,
+          3,
+          6,
+          9,
+          4,
+          5,
+          6,
+          6,
+          6,
+          8,
+          8,
+          8,
+          5,
+          3,
+          5,
+          6,
+          6,
+          3,
+          4,
+          6,
+          7,
+          6,
+          4,
+          6,
+          8,
+          6,
+          5,
+          9,
+          7,
+          6,
+          7,
+          7,
+          6,
+          7,
+          4,
+          5,
+          5,
+          6
+        ],
+        "timeline": [
+          {
+            "minute": 1,
+            "memMb": 663.8,
+            "lateFrames": 0,
+            "lateNotes": 1,
+            "errors": 0,
+            "editError": null
+          },
+          {
+            "minute": 2,
+            "memMb": 674,
+            "lateFrames": 0,
+            "lateNotes": 1,
+            "errors": 0,
+            "editError": null
+          },
+          {
+            "minute": 3,
+            "memMb": 688.3,
+            "lateFrames": 0,
+            "lateNotes": 1,
+            "errors": 0,
+            "editError": null
+          },
+          {
+            "minute": 4,
+            "memMb": 696.1,
+            "lateFrames": 0,
+            "lateNotes": 1,
+            "errors": 0,
+            "editError": null
+          },
+          {
+            "minute": 5,
+            "memMb": 715,
+            "lateFrames": 0,
+            "lateNotes": 1,
+            "errors": 0,
+            "edit": true,
+            "editError": null
+          },
+          {
+            "minute": 6,
+            "memMb": 720.7,
+            "lateFrames": 1024,
+            "lateNotes": 1,
+            "errors": 0,
+            "editError": null
+          },
+          {
+            "minute": 7,
+            "memMb": 728.7,
+            "lateFrames": 1024,
+            "lateNotes": 1,
+            "errors": 0,
+            "editError": null
+          },
+          {
+            "minute": 8,
+            "memMb": 735,
+            "lateFrames": 1024,
+            "lateNotes": 1,
+            "errors": 0,
+            "editError": null
+          },
+          {
+            "minute": 9,
+            "memMb": 743.8,
+            "lateFrames": 1024,
+            "lateNotes": 1,
+            "errors": 0,
+            "editError": null
+          },
+          {
+            "minute": 10,
+            "memMb": 753.6,
+            "lateFrames": 1024,
+            "lateNotes": 1,
+            "errors": 0,
+            "edit": true,
+            "editError": null
+          },
+          {
+            "minute": 11,
+            "memMb": 760.7,
+            "lateFrames": 2048,
+            "lateNotes": 1,
+            "errors": 0,
+            "editError": null
+          },
+          {
+            "minute": 12,
+            "memMb": 772.7,
+            "lateFrames": 2048,
+            "lateNotes": 1,
+            "errors": 0,
+            "editError": null
+          },
+          {
+            "minute": 13,
+            "memMb": 779.9,
+            "lateFrames": 2048,
+            "lateNotes": 1,
+            "errors": 0,
+            "editError": null
+          },
+          {
+            "minute": 14,
+            "memMb": 787.7,
+            "lateFrames": 2048,
+            "lateNotes": 1,
+            "errors": 0,
+            "editError": null
+          },
+          {
+            "minute": 15,
+            "memMb": 794.2,
+            "lateFrames": 2048,
+            "lateNotes": 1,
+            "errors": 0,
+            "editError": null
+          },
+          {
+            "minute": 16,
+            "memMb": 890.7,
+            "lateFrames": 256,
+            "lateNotes": 2,
+            "errors": 0,
+            "editError": null
+          },
+          {
+            "minute": 17,
+            "memMb": 892.8,
+            "lateFrames": 256,
+            "lateNotes": 2,
+            "errors": 0,
+            "editError": null
+          },
+          {
+            "minute": 18,
+            "memMb": 892,
+            "lateFrames": 256,
+            "lateNotes": 2,
+            "errors": 0,
+            "editError": null
+          },
+          {
+            "minute": 19,
+            "memMb": 892.5,
+            "lateFrames": 256,
+            "lateNotes": 2,
+            "errors": 0,
+            "editError": null
+          },
+          {
+            "minute": 20,
+            "memMb": 894.2,
+            "lateFrames": 256,
+            "lateNotes": 2,
+            "errors": 0,
+            "edit": true,
+            "editError": null
+          }
+        ],
+        "headline": "20 min: memory 664 -> 894 MB (1095 MB/h), drift 0.59 ms, plugin spread 41.97 ms, 2304 late frames, 0 errors, 1 exports"
+      },
+      "notes": {
+        "minutes": 20,
+        "code": "setcps(0.5)\n$: note(\"c6 ~ ~ ~\").s(\"sine\").decay(0.03).sustain(0).gain(0.5).orbit(1)\n$: note(\"c3 ~ ~ ~\").clap('Surge XT', { id: 'soak-synth' }).orbit(2)\n$: note(\"e6 ~ ~ ~\").s(\"sine\").decay(0.03).sustain(0).gain(0.5).orbit(3).clapfx('Surge XT Effects', { id: 'soak-fx' })\n$: s(\"hh*8\").gain(0.2).orbit(4)\n$: note(\"<c3 e3 g3 b3>*4\").s(\"sawtooth\").lpf(sine.range(300, 2000).slow(4)).gain(0.2).orbit(5)\n$: s(\"bd*2\").gain(0.3).orbit(6).room(0.2)\nmasterfx('Surge XT Effects', { id: 'soak-master' })",
+        "editEveryMinutes": 5,
+        "exportEveryMinutes": 15,
+        "error": "a note was off its cycle grid by 39.57 ms"
+      },
+      "run": {
+        "ranAt": "2026-10-03T13:17:01.501Z",
+        "commit": "47b0ba07",
+        "dirty": true,
+        "source": "probe",
+        "node": "v22.21.1",
+        "platform": "linux-x64",
+        "thresholds": {
+          "timeoutMs": 10800000,
+          "minutes": 120,
+          "maxMemGrowthMbPerHour": 50,
+          "maxDriftMs": 1,
+          "maxSpreadMs": 5,
+          "maxLateFrames": 0
         }
       }
     }

@@ -1,7 +1,7 @@
 // Effect plugins in the desktop app: CLAP audio effects on an orbit or the master, hosted by the Rust
 // backend (src-tauri/src/audio/mixer.rs). Registered as superdough's insert provider when running in
 // Tauri. An insert sends the orbit's audio to Rust in chunks, Rust runs it through the chain, and the
-// result plays LATENCY_FRAMES after the audio went in; superdough schedules everything on that orbit
+// result plays a fixed latency after the audio went in (fxLatency); superdough schedules everything on that orbit
 // that much early, so it is heard at its time (docs/superpowers/plans/2026-10-02-native-desktop-audio.md).
 // The audio goes from the insert's worklet straight to a Web Worker, which sends it to Rust through
 // the app's `strudelfx` URI scheme: the page's main thread, whose stalls would make chunks late, isn't
@@ -17,17 +17,30 @@ import {
 import { Invoke } from './utils.mjs';
 import { paramChanges } from './clap.mjs';
 
-// frames per chunk sent to Rust (one render quantum), and how long after going in the audio comes
-// out: the round trip to Rust (measured: under 1 ms) has LATENCY_FRAMES - CHUNK_FRAMES (8 ms at
-// 48 kHz) to come back
+// frames per chunk sent to Rust (one render quantum), and by default how long after going in the
+// audio comes out. A chunk's round trip (complete in the worklet -> processed and back in it) was
+// measured at 15-20 ms, up to 32 ms in an insert's first second; 1536 frames left no margin on a
+// busy machine (chunks came back late), so the default leaves a 43 ms budget. fxLatency changes it.
 const CHUNK_FRAMES = 128;
-const LATENCY_FRAMES = 1536;
+let latencyFrames = 2048;
+
+/**
+ * How long effect plugins (clapfx, masterfx) take, in ms: the audio through them is heard that much
+ * after it plays (everything on their orbit plays that much early, so it stays in time). Shorter
+ * suits a fast, idle machine; too short, and chunks come back from the plugins too late and play
+ * unprocessed (fxStats counts them). For effects added from now on; the default is ~46 ms.
+ * @param {number} ms
+ */
+export function fxLatency(ms) {
+  latencyFrames = Math.max(4, Math.round(((ms / 1000) * 48000) / CHUNK_FRAMES)) * CHUNK_FRAMES;
+}
 const WARMUP_CHUNKS = 64;
 
 const INSERT = `
 class StrudelFxInsert extends AudioWorkletProcessor {
-  constructor() {
+  constructor(options) {
     super();
+    this.latency = options.processorOptions.latency;
     this.chunk = new Float32Array(${CHUNK_FRAMES} * 2);
     this.fill = 0;
     this.chunkStart = 0;
@@ -89,9 +102,9 @@ class StrudelFxInsert extends AudioWorkletProcessor {
         this.fx?.postMessage({ start: this.chunkStart, samples }, [samples.buffer]);
       }
     }
-    // output frame f carries input frame f - LATENCY_FRAMES
+    // output frame f carries input frame f - latency
     for (let i = 0; i < n; i++) {
-      const source = now + i - ${LATENCY_FRAMES};
+      const source = now + i - this.latency;
       for (const [start, chunk] of this.chunks) {
         if (source >= start && source < start + ${CHUNK_FRAMES}) {
           const k = (source - start) * 2;
@@ -112,7 +125,7 @@ class StrudelFxInsert extends AudioWorkletProcessor {
       }
     }
     for (const start of this.chunks.keys()) {
-      if (start + ${CHUNK_FRAMES} <= now + n - ${LATENCY_FRAMES}) this.chunks.delete(start);
+      if (start + ${CHUNK_FRAMES} <= now + n - this.latency) this.chunks.delete(start);
     }
     if (++this.ticks % 375 === 0) this.port.postMessage({ stats: { frames: this.frames, lateFrames: this.lateFrames, lateAt: this.lateAt, lateBySecond: [...this.lateBySecond].map((x) => x ?? 0), maxAgeFrames: [...this.maxAge].map((x) => x ?? 0) } });
     return true;
@@ -232,8 +245,13 @@ function createInsert(audioContext, chain, { key }) {
   const input = new GainNode(audioContext, { channelCount: 2, channelCountMode: 'explicit' });
   const output = new GainNode(audioContext);
   // until the worklet is ready: the same latency, unprocessed
-  const delay = new DelayNode(audioContext, { maxDelayTime: 1, delayTime: LATENCY_FRAMES / sampleRate });
-  input.connect(delay).connect(output);
+  // (in frames of this context: fxLatency is set for 48 kHz)
+  const latency = Math.round((latencyFrames * sampleRate) / 48000 / CHUNK_FRAMES) * CHUNK_FRAMES;
+  // until the worklet runs: the same latency, unprocessed; it hands over at the moment the worklet's
+  // own output begins, so no audio is lost in between
+  const delay = new DelayNode(audioContext, { maxDelayTime: 2, delayTime: latency / sampleRate });
+  const delayGain = new GainNode(audioContext);
+  input.connect(delay).connect(delayGain).connect(output);
   let node;
   let closed = false;
   // the chain as loaded: [{ name, index, params }] (null while loading)
@@ -278,6 +296,7 @@ function createInsert(audioContext, chain, { key }) {
         numberOfInputs: 1,
         numberOfOutputs: 1,
         outputChannelCount: [2],
+        processorOptions: { latency },
       });
       node.port.onmessage = ({ data }) => {
         if (data.stats) stats.set(key, data.stats);
@@ -287,16 +306,27 @@ function createInsert(audioContext, chain, { key }) {
       node.port.postMessage({ port: channel.port1 }, [channel.port1]);
       getFxWorker().postMessage({ id, port: channel.port2 }, [channel.port2]);
       getFxWorker().postMessage({ id, chain: loaded?.map((e) => e.index).join(',') || null });
-      input.disconnect(delay);
-      delay.disconnect();
-      input.connect(node).connect(output);
+      // the worklet's output is silent for its first `latency` frames (it has no audio from before it
+      // started): the delay plays until then, with a margin for when the worklet actually starts
+      const nodeGain = new GainNode(audioContext, { gain: 0 });
+      input.connect(node).connect(nodeGain).connect(output);
+      const handover = audioContext.currentTime + latency / sampleRate + 0.02;
+      nodeGain.gain.setValueAtTime(1, handover);
+      delayGain.gain.setValueAtTime(0, handover);
+      setTimeout(() => {
+        if (closed) return;
+        input.disconnect(delay);
+        delay.disconnect();
+      delayGain.disconnect();
+        delayGain.disconnect();
+      }, (latency / sampleRate + 0.5) * 1000);
     })
     .catch((err) => logger(`[clapfx] could not load the insert: ${err}`, 'error'));
 
   return {
     input,
     output,
-    latency: LATENCY_FRAMES / sampleRate,
+    latency: latency / sampleRate,
     setChain: (chain) => load(chain),
     // automation of the effects' parameters: `.auto(signal, { c: '<instance name>:<parameter>' })`
     onHap(value, t, duration) {
@@ -343,7 +373,7 @@ let pendingMasterChain = null;
  *   note("c3 e3").clap('Surge XT').orbit(2).clapfx('Surge XT Effects').clapfx('Compressor', { id: 'glue' })
  * Each effect on each orbit is its own instance, named by its id or else "<plugin> (orbit <n>)";
  * clapGui, clapState and clapParams take that name, and `auto` reaches its parameters as
- * `{ c: '<name>:<parameter>' }`. The orbit's audio is heard ~11 ms after it plays, and everything on
+ * `{ c: '<name>:<parameter>' }`. The orbit's audio is heard ~46 ms (fxLatency) after it plays, and everything on
  * the orbit plays that much early, so it stays in time. Haps without clapfx leave the orbit's
  * effects as they are; clapfx(null) removes them (a section without). Exports include the effects,
  * and their changes.
@@ -393,7 +423,8 @@ registerEvalHook({
   before() {
     pendingMasterChain = [];
   },
-  after({ pattern, cycle }) {
+  // before the new pattern's first haps are scheduled: they must get the latency of the inserts
+  ready({ pattern, cycle }) {
     masterChain = pendingMasterChain ?? [];
     pendingMasterChain = null;
     setMasterInserts(masterChain);
